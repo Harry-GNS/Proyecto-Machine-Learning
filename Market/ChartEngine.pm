@@ -27,6 +27,11 @@ sub new {
         crosshair_x       => -1,   # Posición X del cursor sincronizado
         crosshair_y       => -1,   # Posición Y del cursor sincronizado
         render_pending    => 0,    # Bandera para optimización O(1) de renderizado
+
+        # --- AÑADIDO: Estado interno para el arrastre del mouse ---
+        drag_start_x      => 0,
+        drag_accum_x      => 0,
+
     };
     
     bless $self, $class;
@@ -40,6 +45,8 @@ sub new {
         price => Market::Panels::Scales->new(),
         atr   => Market::Panels::Scales->new(),
     };
+    #Activamos el enlace de eventos para ambos canvas
+    $self->bind_events();
     
     return $self;
 }
@@ -109,10 +116,63 @@ sub render {
     }
 }
 
+sub bind_events {
+    my ($self) = @_;
+    
+    # Aplicamos la misma interacción a todos los paneles (Precios y ATR)
+    foreach my $panel_name (keys %{$self->{canvases}}) {
+        my $canvas = $self->{canvases}->{$panel_name};
+        
+        # Evento 1: Usuario presiona el botón izquierdo del mouse (<ButtonPress-1>)
+        $canvas->Tk::bind('<ButtonPress-1>', sub {
+            my $e = $canvas->XEvent;
+            $self->{drag_start_x} = $e->x; # Guardamos el píxel de origen
+            $self->{drag_accum_x} = 0;     # Reiniciamos la inercia
+        });
+        
+        # Evento 2: Usuario mueve el mouse mientras mantiene el clic presionado (<B1-Motion>)
+        $canvas->Tk::bind('<B1-Motion>', sub {
+            my $e = $canvas->XEvent;
+            my $current_x = $e->x;
+            
+            # Calculamos cuántos píxeles se movió el mouse
+            my $delta_x = $current_x - $self->{drag_start_x};
+            
+            # Sabemos por Scales.pm que cada vela ocupa 10 píxeles de ancho
+            my $bar_width = 10; 
+            
+            $self->{drag_accum_x} += $delta_x;
+            
+            # Si el arrastre es mayor al grosor de una vela, desplazamos el gráfico
+            if (abs($self->{drag_accum_x}) >= $bar_width) {
+                # Calculamos cuántas velas enteras debemos desplazar
+                my $bars_to_move = int($self->{drag_accum_x} / $bar_width);
+                
+                # Lógica de TradingView: 
+                # Arrastrar a la derecha (delta > 0) revela datos del pasado (offset aumenta)
+                $self->{offset} += $bars_to_move;
+                
+                # Validamos no salirnos de los límites del dataset (Evitar un "Index Out of Bounds")
+                my $max_offset = $self->{market_data}->size() - $self->{visible_bars};
+                $self->{offset} = $max_offset if $self->{offset} > $max_offset;
+                $self->{offset} = 0 if $self->{offset} < 0;
+                
+                # Descontamos el movimiento procesado del acumulador
+                $self->{drag_accum_x} -= ($bars_to_move * $bar_width);
+                
+                # Repintamos la pantalla con el nuevo offset temporal
+                $self->request_render();
+            }
+            
+            # Actualizamos el origen para el siguiente frame continuo
+            $self->{drag_start_x} = $current_x;
+        });
+    }
+}
+
 # --- Esqueletos para Interacción y Eventos (Siguiente fase) ---
 
 sub _bind_all_canvas       { my ($self) = @_; }
-sub bind_events            { my ($self) = @_; }
 sub _horizontal_zoom       { my ($self, $delta) = @_; }
 sub _vertical_drag         { my ($self, $dy) = @_; }
 sub _vertical_zoom         { my ($self, $factor) = @_; }
