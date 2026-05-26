@@ -44,23 +44,50 @@ while (my $line = <$fh>) {
         volume    => $volume
     });
     
-    # Actualizar las features (indicadores) en complejidad O(1) de forma incremental
-    $indicator_mgr->update_last($data);
+    
 }
 close $fh;
+# Preprocesamiento: Construir las matrices de 5m y 15m
+$data->build_timeframes();
 
-# 5. Crear los Canvas arquitectónicos (Paneles de Precio y ATR)
+# Calcular los indicadores completos de la temporalidad por defecto (1m)
+$indicator_mgr->recompute_all($data);
+
+
+# 5. Crear la Barra de Herramientas (Toolbar) en la parte superior
+my $toolbar = $mw->Frame(-background => '#E0E3EB')->pack(-side => 'top', -fill => 'x');
+
+# 6. Crear los Canvas (Paneles de Precio y ATR) justo debajo del Toolbar
 my $price_canvas = $mw->Canvas(-background => 'white')->pack(-expand => 1, -fill => 'both');
 my $atr_canvas   = $mw->Canvas(-background => '#f0f0f0', -height => 150)->pack(-fill => 'x');
 
-# 6. Inicializar el Motor de Gráficos Financieros
-# ¡CORRECCIÓN! Se inyectó indicator_manager => $indicator_mgr
+# 7. Inicializar el Motor de Gráficos Financieros
 my $engine = Market::ChartEngine->new(
     market_data       => $data,
     indicator_manager => $indicator_mgr,
     canvases          => { price => $price_canvas, atr => $atr_canvas }
 );
 
-# 7. Renderizar el estado inicial de la ventana y arrancar el ciclo de vida de Tk
+# 8. Agregar Botones de Temporalidad al Toolbar
+# Los botones se empaquetan a la izquierda (-side => 'left') y llaman al método del motor
+$toolbar->Button(
+    -text    => "1m", 
+    -command => sub { $engine->set_timeframe('1m'); },
+    -relief  => 'groove'
+)->pack(-side => 'left', -padx => 5, -pady => 5);
+
+$toolbar->Button(
+    -text    => "5m", 
+    -command => sub { $engine->set_timeframe('5m'); },
+    -relief  => 'groove'
+)->pack(-side => 'left', -padx => 2, -pady => 5);
+
+$toolbar->Button(
+    -text    => "15m", 
+    -command => sub { $engine->set_timeframe('15m'); },
+    -relief  => 'groove'
+)->pack(-side => 'left', -padx => 2, -pady => 5);
+
+# 9. Renderizar el estado inicial de la ventana y arrancar el ciclo de vida de Tk
 $engine->request_render();
 MainLoop;

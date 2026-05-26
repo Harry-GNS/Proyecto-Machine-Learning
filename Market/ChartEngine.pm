@@ -186,6 +186,14 @@ sub bind_events {
             $self->{crosshair_y} = -1;
             $self->_draw_crosshair_all();
         });
+
+        # Eventos de teclado para cambiar temporalidades (1m, 5m, 15m)
+        my $mw = $self->{canvases}->{price}->toplevel;
+        
+        # Atajos de teclado: '1' para 1m, '5' para 5m y 'f' (fifteen) para 15m
+        $mw->Tk::bind('<KeyPress-1>', sub { $self->set_timeframe('1m'); });
+        $mw->Tk::bind('<KeyPress-5>', sub { $self->set_timeframe('5m'); });
+        $mw->Tk::bind('<KeyPress-f>', sub { $self->set_timeframe('15m'); });
     }
 }
 
@@ -214,6 +222,25 @@ sub _draw_crosshair_all {
     }
 }
 
+sub set_timeframe {
+    my ($self, $tf) = @_;
+    
+    # 1. Ajustamos la matriz activa [cite: 526]
+    $self->{market_data}->set_timeframe($tf);
+    
+    # 2. Recalculamos las features para los tensores de esta matriz
+    if (defined $self->{indicator_manager}) {
+        $self->{indicator_manager}->recompute_all($self->{market_data});
+    }
+    
+    # 3. Reseteamos el scroll para evitar crasheos (Out of bounds) al tener menos velas [cite: 527]
+    $self->{offset} = 0;
+    
+    # 4. Redibujamos
+    $self->request_render();
+    print "Cambiado a temporalidad: $tf\n";
+}
+
 # --- Esqueletos para Interacción y Eventos (Siguiente fase) ---
 
 sub _bind_all_canvas       { my ($self) = @_; }
@@ -221,7 +248,6 @@ sub _horizontal_zoom       { my ($self, $delta) = @_; }
 sub _vertical_drag         { my ($self, $dy) = @_; }
 sub _vertical_zoom         { my ($self, $factor) = @_; }
 sub _on_mouse_move         { my ($self, $event) = @_; }
-sub set_timeframe          { my ($self, $tf) = @_; }
 sub reset_view             { my ($self) = @_; }
 sub compute_intraday_labels { my ($self) = @_; }
 sub get_all_timestamps     { my ($self) = @_; }

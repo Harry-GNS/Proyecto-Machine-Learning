@@ -60,5 +60,37 @@ sub reset {
     $self->{values}     = [];
     $self->{tr_history} = [];
 }
+# Procesamiento de extracción de características por Lotes (Batch)
+sub compute_all {
+    my ($self, $market_data) = @_;
+    $self->reset(); # Purga los datos previos
+    
+    my $size = $market_data->size();
+    for my $i (0 .. $size - 1) {
+        my $current = $market_data->get_candle($i);
+        my $tr;
+
+        if ($i == 0) {
+            $tr = $current->{high} - $current->{low};
+        } else {
+            my $prev = $market_data->get_candle($i - 1);
+            my $hl = $current->{high} - $current->{low};
+            my $hc = abs($current->{high} - $prev->{close});
+            my $lc = abs($current->{low} - $prev->{close});
+            $tr = List::Util::max($hl, $hc, $lc);
+        }
+        
+        push @{$self->{tr_history}}, $tr;
+
+        if ($i == 0) {
+            push @{$self->{values}}, $tr;
+        } else {
+            my $prev_atr = $self->{values}->[-1];
+            my $n = $self->{period};
+            my $current_atr = (($prev_atr * ($n - 1)) + $tr) / $n;
+            push @{$self->{values}}, $current_atr;
+        }
+    }
+}
 
 1;
