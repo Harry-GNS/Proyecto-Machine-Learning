@@ -91,5 +91,6 @@ $toolbar->Button(
 )->pack(-side => 'left', -padx => 2, -pady => 5);
 
 # 9. Renderizar el estado inicial de la ventana y arrancar el ciclo de vida de Tk
+$mw->update; # <--- Obliga a calcular el tamaño real de la pantalla)
 $engine->request_render();
 MainLoop;

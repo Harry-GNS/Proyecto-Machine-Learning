@@ -187,6 +187,11 @@ sub bind_events {
             $self->_draw_crosshair_all();
         });
 
+        # --- Detectar cuando la ventana cambia de tamaño ---
+        $canvas->Tk::bind('<Configure>', sub {
+            $self->request_render();
+        });
+
         # Eventos de teclado para cambiar temporalidades (1m, 5m, 15m)
         my $mw = $self->{canvases}->{price}->toplevel;
         
