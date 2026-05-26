@@ -161,12 +161,56 @@ sub bind_events {
                 $self->{drag_accum_x} -= ($bars_to_move * $bar_width);
                 
                 # Repintamos la pantalla con el nuevo offset temporal
-                $self->request_render();
+                $self->request_render();    
             }
             
             # Actualizamos el origen para el siguiente frame continuo
-            $self->{drag_start_x} = $current_x;
+            $self->{drag_start_x} = $e->x;
         });
+        
+        # --- NUEVO: Eventos para el Crosshair ---
+        
+        # Cuando el mouse se mueve sobre cualquier panel
+        $canvas->Tk::bind('<Motion>', sub {
+            my $e = $canvas->XEvent;
+            $self->{crosshair_x} = $e->x;
+            $self->{crosshair_y} = $e->y;
+            $self->{active_panel} = $panel_name; # Guardamos en qué panel está el mouse
+            
+            $self->_draw_crosshair_all();
+        });
+        
+        # Cuando el mouse sale del área de dibujo
+        $canvas->Tk::bind('<Leave>', sub {
+            $self->{crosshair_x} = -1;
+            $self->{crosshair_y} = -1;
+            $self->_draw_crosshair_all();
+        });
+    }
+}
+
+# Subrutina encargada de orquestar el dibujado de la cruz en todos los paneles
+sub _draw_crosshair_all {
+    my ($self) = @_;
+    
+    # 1. Crosshair en el panel de precios
+    $self->{price_panel}->draw_crosshair(
+        $self->{canvases}->{price}, 
+        $self->{crosshair_x}, 
+        $self->{crosshair_y}, 
+        $self->{active_panel} eq 'price', # ¿Es el panel activo?
+        $self->{scales}->{price}
+    );
+    
+    # 2. Crosshair en el panel del ATR
+    if (defined $self->{indicator_manager}) {
+        $self->{atr_panel}->draw_crosshair(
+            $self->{canvases}->{atr}, 
+            $self->{crosshair_x}, 
+            $self->{crosshair_y}, 
+            $self->{active_panel} eq 'atr', # ¿Es el panel activo?
+            $self->{scales}->{atr}
+        );
     }
 }
 
@@ -177,7 +221,6 @@ sub _horizontal_zoom       { my ($self, $delta) = @_; }
 sub _vertical_drag         { my ($self, $dy) = @_; }
 sub _vertical_zoom         { my ($self, $factor) = @_; }
 sub _on_mouse_move         { my ($self, $event) = @_; }
-sub _draw_crosshair_all    { my ($self) = @_; }
 sub set_timeframe          { my ($self, $tf) = @_; }
 sub reset_view             { my ($self) = @_; }
 sub compute_intraday_labels { my ($self) = @_; }

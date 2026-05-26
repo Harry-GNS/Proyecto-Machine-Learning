@@ -59,4 +59,54 @@ sub render {
     }
 }
 
+sub draw_crosshair {
+    my ($self, $canvas, $x, $y, $is_active_panel, $scale) = @_;
+    
+    # Limpiamos el crosshair del frame anterior
+    $canvas->delete('crosshair');
+    
+    # Si las coordenadas son negativas (mouse fuera de pantalla), abortamos
+    return if $x < 0 || $y < 0;
+    
+    my $height = $scale->{canvas_height};
+    my $width  = $canvas->width() || 1024;
+    
+    # 1. DIBUJAR LÍNEA VERTICAL (Tiempo)
+    # Se dibuja siempre en ambos paneles para mantener la sincronización visual
+    $canvas->createLine(
+        $x, 0, $x, $height, 
+        -dash => '-', 
+        -fill => '#707a8a', 
+        -tags => 'crosshair'
+    );
+    
+    # 2. DIBUJAR LÍNEA HORIZONTAL Y VALOR EXACTO (Precios/Indicadores)
+    # Solo se dibuja en el panel donde el usuario tiene el mouse
+    if ($is_active_panel) {
+        $canvas->createLine(
+            0, $y, $width - 80, $y, 
+            -dash => '-', 
+            -fill => '#707a8a', 
+            -tags => 'crosshair'
+        );
+        
+        # Calcular el valor exacto usando la transformación inversa de Scales.pm
+        my $exact_value = $scale->y_to_value($y);
+        
+        # Dibujar un pequeño recuadro oscuro sobre el eje Y con el valor exacto
+        $canvas->createRectangle(
+            $width - 80, $y - 12, $width, $y + 12, 
+            -fill => '#2A2E39', 
+            -tags => 'crosshair'
+        );
+        $canvas->createText(
+            $width - 40, $y, 
+            -text => sprintf("%.2f", $exact_value), 
+            -fill => 'white', 
+            -font => 'Arial 9 bold',
+            -tags => 'crosshair'
+        );
+    }
+}
+
 1;
