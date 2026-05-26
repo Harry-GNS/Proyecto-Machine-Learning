@@ -16,8 +16,10 @@ use Market::Indicators::ATR;
 
 # 2. Crear ventana principal de la interfaz gráfica
 my $mw = MainWindow->new;
-$mw->title("Motor de Charting ML");
-$mw->geometry("1024x768");
+$mw->title("Gráficos Financieros con Perl y Tk - Proyecto de Machine Learning");
+
+# Eliminado $mw->geometry y uso el atributo zoomed
+$mw->attributes('-zoomed' => 1);
 
 # 3. Instanciar Capa de Datos y Gestor de Indicadores
 # ¡CORRECCIÓN! Se unificó y eliminó la doble declaración de $data
