@@ -6,9 +6,9 @@ use List::Util qw(max);
 sub new {
     my ($class, $period) = @_;
     my $self = {
-        period => $period || 14,
-        values => [], # Historial del ATR
-        tr_history => [],
+        period     => $period || 14,
+        values     => [], # Historial del ATR (La "feature" extraída)
+        tr_history => [], # Historial de True Ranges
     };
     bless $self, $class;
     return $self;
@@ -22,6 +22,7 @@ sub update_last {
     my $current = $market_data->get_candle($index);
     my $tr;
 
+    # Cálculo del True Range (TR)
     if ($index == 0) {
         $tr = $current->{high} - $current->{low};
     } else {
@@ -44,4 +45,20 @@ sub update_last {
         push @{$self->{values}}, $current_atr;
     }
 }
+
+# --- ESTAS SON LAS FUNCIONES QUE FALTABAN ---
+
+# Devuelve la serie completa del ATR al IndicatorManager
+sub get_values {
+    my ($self) = @_;
+    return $self->{values};
+}
+
+# Reinicia el indicador (Útil cuando cambies de temporalidad 1m -> 5m)
+sub reset {
+    my ($self) = @_;
+    $self->{values}     = [];
+    $self->{tr_history} = [];
+}
+
 1;
