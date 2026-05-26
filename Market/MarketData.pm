@@ -27,3 +27,4 @@ sub size {
     my ($self) = @_;
     return scalar @{$self->{data}};
 }
+1;

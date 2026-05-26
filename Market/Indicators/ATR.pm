@@ -44,3 +44,4 @@ sub update_last {
         push @{$self->{values}}, $current_atr;
     }
 }
+1;

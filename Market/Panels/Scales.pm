@@ -1,7 +1,7 @@
 package Market::Panels::Scales;
 use strict;
 use warnings;
-1;
+
 
 sub value_to_y {
     my ($self, $value) = @_;
@@ -15,3 +15,4 @@ sub value_to_y {
     my $y = $height - ((($value - $min) / ($max - $min)) * $height);
     return $y;
 }
+1;
