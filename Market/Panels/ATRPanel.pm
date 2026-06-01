@@ -1,112 +1,123 @@
 package Market::Panels::ATRPanel;
+
 use strict;
 use warnings;
+use List::Util qw(min max);
 
 sub new {
     my ($class, %args) = @_;
     my $self = {
-        %args,
+        canvas    => $args{canvas},
+        scale     => undef,
+        crosshair => {},
     };
     bless $self, $class;
+    
+    $self->_init_crosshair_objects();
     return $self;
 }
 
+sub _init_crosshair_objects {
+    my ($self) = @_;
+    my $c = $self->{canvas};
+    $self->{crosshair}->{vline} = $c->createLine(0, 0, 0, 0, -fill => 'gray', -dash => '.', -state => 'hidden');
+    $self->{crosshair}->{hline} = $c->createLine(0, 0, 0, 0, -fill => 'gray', -dash => '.', -state => 'hidden');
+    $self->{crosshair}->{text}  = $c->createText(0, 0, -text => '', -fill => 'white', -state => 'hidden');
+}
+
 sub get_y_range {
-    my ($self, $indicator_values, $start_idx, $end_idx) = @_;
+    my ($self, $data_slice) = @_;
     
-    # Encontrar el valor mínimo y máximo del ATR en la ventana visible
-    my $min = $indicator_values->[$start_idx] || 0;
-    my $max = $min;
-    
-    for my $i ($start_idx .. $end_idx) {
-        my $val = $indicator_values->[$i];
-        next unless defined $val;
-        $min = $val if $val < $min;
-        $max = $val if $val > $max;
+    # Filtramos los valores no definidos (el ATR no tiene valor en las primeras 'n' velas)
+    my @valid_values = grep { defined $_ } @$data_slice;
+    return (0, 1) unless @valid_values;
+
+    my $min_val = $valid_values[0];
+    my $max_val = $valid_values[0];
+
+    foreach my $val (@valid_values) {
+        $min_val = min($min_val, $val);
+        $max_val = max($max_val, $val);
     }
+
+    # Damos un margen del 10% para que la línea no golpee el techo/piso del canvas
+    my $padding = ($max_val - $min_val) * 0.10;
+    $padding = 0.0001 if $padding == 0; # Protección rango plano
     
-    # Añadimos un pequeño margen (padding) visual del 10%
-    my $padding = ($max - $min) * 0.1;
-    return ($min - $padding, $max + $padding);
+    return ($min_val - $padding, $max_val + $padding);
+}
+
+sub set_scale {
+    my ($self, $scale) = @_;
+    $self->{scale} = $scale;
 }
 
 sub render {
-    my ($self, $canvas, $indicator_values, $scale, $start_idx, $end_idx) = @_;
+    my ($self, $data_slice) = @_;
+    my $c = $self->{canvas};
+    my $s = $self->{scale};
     
-    # Limpiamos solo la línea del indicador anterior
-    $canvas->delete('atr_line'); 
-    
+    return unless $s && @$data_slice;
+
+    # Limpiar fotograma anterior
+    $c->delete('atr_line'); 
+
     my @coords;
-    for my $i ($start_idx .. $end_idx) {
-        my $val = $indicator_values->[$i];
-        next unless defined $val; # Ignorar si no hay valor (ej. primeras 14 velas)
+    
+    for my $i (0 .. $#{$data_slice}) {
+        my $val = $data_slice->[$i];
         
-        # Transformación lineal a pixeles usando tu clase Scales
-        my $x = $scale->index_to_center_x($i);
-        my $y = $scale->value_to_y($val);
+        # Saltamos el dibujo si estamos en el inicio histórico donde el ATR aún no se calcula
+        next unless defined $val; 
+        
+        my $x = $s->index_to_center_x($i);
+        my $y = $s->value_to_y($val);
         
         push @coords, $x, $y;
     }
     
-    # Dibuja la línea solo si hay suficientes puntos
-    if (@coords >= 4) { 
-        $canvas->createLine(
+    # Dibujar la línea continua si tenemos al menos 2 puntos (4 coordenadas: x1, y1, x2, y2)
+    if (@coords >= 4) {
+        $c->createLine(
             @coords,
-            -fill  => '#2962FF', # Azul característico de TradingView
-            -width => 1.5,
+            -fill  => '#2962FF', # Color Azul clásico de indicadores en TradingView
+            -width => 2,
             -tags  => 'atr_line'
         );
     }
+    
+    # Dibujar escala de valores del ATR a la derecha
+    $s->_draw_y_scale($c);
 }
 
 sub draw_crosshair {
-    my ($self, $canvas, $x, $y, $is_active_panel, $scale) = @_;
+    my ($self, $x, $y) = @_;
+    my $c = $self->{canvas};
+    my $s = $self->{scale};
     
-    # Limpiamos el crosshair del frame anterior
-    $canvas->delete('crosshair');
-    
-    # Si las coordenadas son negativas (mouse fuera de pantalla), abortamos
-    return if $x < 0 || $y < 0;
-    
-    my $height = $scale->{canvas_height};
-    my $width  = $canvas->width() || 1024;
-    
-    # 1. DIBUJAR LÍNEA VERTICAL (Tiempo)
-    # Se dibuja siempre en ambos paneles para mantener la sincronización visual
-    $canvas->createLine(
-        $x, 0, $x, $height, 
-        -dash => '-', 
-        -fill => '#707a8a', 
-        -tags => 'crosshair'
-    );
-    
-    # 2. DIBUJAR LÍNEA HORIZONTAL Y VALOR EXACTO (Precios/Indicadores)
-    # Solo se dibuja en el panel donde el usuario tiene el mouse
-    if ($is_active_panel) {
-        $canvas->createLine(
-            0, $y, $width - 80, $y, 
-            -dash => '-', 
-            -fill => '#707a8a', 
-            -tags => 'crosshair'
-        );
-        
-        # Calcular el valor exacto usando la transformación inversa de Scales.pm
-        my $exact_value = $scale->y_to_value($y);
-        
-        # Dibujar un pequeño recuadro oscuro sobre el eje Y con el valor exacto
-        $canvas->createRectangle(
-            $width - 80, $y - 12, $width, $y + 12, 
-            -fill => '#2A2E39', 
-            -tags => 'crosshair'
-        );
-        $canvas->createText(
-            $width - 40, $y, 
-            -text => sprintf("%.2f", $exact_value), 
-            -fill => 'white', 
-            -font => 'Arial 9 bold',
-            -tags => 'crosshair'
-        );
+    # Lógica idéntica a PricePanel para mostrar/ocultar el cursor
+    if (!defined $x || !defined $y) {
+        $c->itemconfigure($self->{crosshair}->{vline}, -state => 'hidden');
+        $c->itemconfigure($self->{crosshair}->{hline}, -state => 'hidden');
+        $c->itemconfigure($self->{crosshair}->{text},  -state => 'hidden');
+        return;
     }
+
+    my $val = $s->y_to_value($y);
+    my $display_val = sprintf("%.4f", $val);
+
+    my $width  = $s->{width};
+    my $height = $s->{height};
+
+    $c->coords($self->{crosshair}->{vline}, $x, 0, $x, $height);
+    $c->coords($self->{crosshair}->{hline}, 0, $y, $width, $y);
+    
+    $c->coords($self->{crosshair}->{text}, $width - 5, $y - 10);
+    $c->itemconfigure($self->{crosshair}->{text}, -text => $display_val);
+
+    $c->itemconfigure($self->{crosshair}->{vline}, -state => 'normal');
+    $c->itemconfigure($self->{crosshair}->{hline}, -state => 'normal');
+    $c->itemconfigure($self->{crosshair}->{text},  -state => 'normal');
 }
 
 1;

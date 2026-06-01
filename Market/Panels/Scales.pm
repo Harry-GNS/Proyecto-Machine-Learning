@@ -1,107 +1,104 @@
 package Market::Panels::Scales;
+
 use strict;
 use warnings;
 
 sub new {
     my ($class, %args) = @_;
     my $self = {
-        min_value     => 0,
-        max_value     => 100,
-        canvas_height => 400,
-        start_index   => 0,   # ¡AÑADIDO! Para calcular posiciones relativas
-        bar_width     => 10,  # Grosor de cada vela + separación
-        %args,
+        width        => $args{width} || 1,        # Ancho del canvas en píxeles
+        height       => $args{height} || 1,       # Alto del canvas en píxeles
+        min_val      => $args{min_val} || 0,      # V_min (Precio o ATR mínimo visible)
+        max_val      => $args{max_val} || 1,      # V_max (Precio o ATR máximo visible)
+        visible_bars => $args{visible_bars} || 1, # Cantidad de velas en pantalla
+        offset       => $args{offset} || 0,       # Desplazamiento horizontal (scroll)
     };
     bless $self, $class;
     return $self;
 }
 
-# Proyección matemática relativa: Convierte el índice de la vela a coordenadas X de pantalla
+# Transformaciones del Eje X (Tiempo)
+sub index_to_x {
+    my ($self, $index) = @_;
+    # Convierte índice -> coordenada X [cite: 298, 299]
+    my $candle_width = $self->{width} / $self->{visible_bars};
+    return ($index - $self->{offset}) * $candle_width;
+}
+
+sub x_to_index_float {
+    my ($self, $x) = @_;
+    # Convierte X -> índice continuo. Más precisión para interacción [cite: 302, 303, 304]
+    my $candle_width = $self->{width} / $self->{visible_bars};
+    return ($x / $candle_width) + $self->{offset};
+}
+
+sub x_to_index {
+    my ($self, $x) = @_;
+    # Convierte X -> índice entero [cite: 300, 301]
+    # Usamos int() para truncar el flotante y obtener el índice del array
+    return int($self->x_to_index_float($x));
+}
+
 sub index_to_center_x {
     my ($self, $index) = @_;
-    # Restamos start_index para que la primera vela visible siempre aparezca al inicio izquierdo
-    my $relative_index = $index - $self->{start_index};
-    return ($relative_index * $self->{bar_width}) + 50; # 50px de margen izquierdo
+    # Devuelve centro de una vela en X [cite: 305, 306]
+    my $candle_width = $self->{width} / $self->{visible_bars};
+    my $x_start = $self->index_to_x($index);
+    return $x_start + ($candle_width / 2);
 }
 
-# Transformación lineal: Mapea el precio/valor al eje píxel Y del Canvas
+# Transformaciones del Eje Y (Valores/Precios)
 sub value_to_y {
     my ($self, $value) = @_;
-    my $min = $self->{min_value};
-    my $max = $self->{max_value};
-    my $height = $self->{canvas_height};
+    # Convierte valor (precio/indicador) -> Y [cite: 307, 308]
+    my $range = $self->{max_val} - $self->{min_val};
     
-    return $height if ($max - $min) == 0; # Prevenir indeterminación matemática
+    # Evitar división por cero si el rango es plano (ej. todos los precios son iguales)
+    return $self->{height} / 2 if $range == 0; 
     
-    # Dejar un 10% de margen arriba y abajo para que las velas no toquen los bordes
-    my $padded_height = $height * 0.8;
-    my $y = $height - ((($value - $min) / ($max - $min)) * $padded_height + ($height * 0.1));
-    return $y;
+    my $normalized_val = ($value - $self->{min_val}) / $range;
+    
+    # Invertimos el eje Y multiplicando por la altura y restando desde el máximo
+    return $self->{height} - ($normalized_val * $self->{height});
 }
 
-# Dibuja la escala vertical Y (Precios o valores del Indicador) a la derecha
+sub y_to_value {
+    my ($self, $y) = @_;
+    # Convierte Y -> valor [cite: 309, 310]
+    my $range = $self->{max_val} - $self->{min_val};
+    
+    if ($self->{height} == 0) { return 0; } # Protección de división por cero
+    
+    # Proceso inverso de la normalización
+    my $normalized_y = ($self->{height} - $y) / $self->{height};
+    return $self->{min_val} + ($normalized_y * $range);
+}
+
 sub _draw_y_scale {
     my ($self, $canvas) = @_;
     
-    # Limpiar la escala y líneas horizontales previas
+    # 1. Limpiar los precios anteriores para evitar que se amontonen y se vean borrosos
     $canvas->delete('y_scale');
     
-    my $min = $self->{min_value};
-    my $max = $self->{max_value};
-    my $width = $canvas->width() || 1024;
+    my $num_labels = 10;
+    my $range = $self->{max_val} - $self->{min_val};
+    my $step = $range / $num_labels;
     
-    # Generar 5 niveles de precios/valores distribuidos uniformemente
-    for my $i (0 .. 4) {
-        my $fraction = $i / 4;
-        my $current_value = $min + $fraction * ($max - $min);
-        my $y = $self->value_to_y($current_value);
+    for my $i (0 .. $num_labels) {
+        my $val = $self->{min_val} + ($i * $step);
+        my $y_pos = $self->value_to_y($val);
         
-        # 1. Dibujar línea de cuadrícula horizontal (Gridline atenuada)
-        $canvas->createLine(
-            0, $y, $width - 80, $y, 
-            -fill => '#E0E3EB', 
-            -dash => '.', 
-            -tags => 'y_scale'
-        );
+        my $display_val = sprintf("%.4f", $val);
         
-        # 2. Dibujar la etiqueta de texto con el precio/valor formateado
+        # 2. Dibujar el texto asegurándonos de asignarle el tag 'y_scale'
         $canvas->createText(
-            $width - 40, $y,
-            -text => sprintf("%.2f", $current_value),
-            -fill => '#707a8a',
-            -font => 'Arial 9',
-            -tags => 'y_scale'
+            $self->{width} - 5, $y_pos, 
+            -text => $display_val, 
+            -anchor => 'e', 
+            -fill => '#d1d4dc', # Gris claro para unificar el diseño
+            -tags => 'y_scale'  # <--- ETIQUETA CRÍTICA AÑADIDA
         );
     }
-    
-    # Dibujar la línea divisoria vertical del eje de precios
-    $canvas->createLine(
-        $width - 80, 0, $width - 80, $self->{canvas_height},
-        -fill => '#E0E3EB',
-        -tags => 'y_scale'
-    );
-}
-
-# --- Conversiones inversas para la interacción de cursor ---
-sub x_to_index { 
-    my ($self, $x) = @_; 
-    return int(($x - 50) / $self->{bar_width}) + $self->{start_index}; 
-}
-
-sub x_to_index_float { 
-    my ($self, $x) = @_; 
-    return (($x - 50) / $self->{bar_width}) + $self->{start_index}; 
-}
-
-sub y_to_value { 
-    my ($self, $y) = @_; 
-    my $min = $self->{min_value};
-    my $max = $self->{max_value};
-    my $height = $self->{canvas_height};
-    my $padded_height = $height * 0.8;
-    
-    my $raw_fraction = ($height - $y - ($height * 0.1)) / $padded_height;
-    return $min + $raw_fraction * ($max - $min);
 }
 
 1;

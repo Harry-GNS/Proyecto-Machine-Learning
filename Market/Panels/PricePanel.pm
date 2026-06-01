@@ -1,142 +1,186 @@
 package Market::Panels::PricePanel;
+
 use strict;
 use warnings;
+use List::Util qw(min max);
 
 sub new {
     my ($class, %args) = @_;
     my $self = {
-        %args,
+        canvas    => $args{canvas}, 
+        scale     => undef,         
+        crosshair => {},            
     };
     bless $self, $class;
+    
+    $self->_init_crosshair_objects();
     return $self;
 }
 
-# Calcula el mínimo y máximo de los precios visibles para adaptar el eje Y dinámicamente
-sub get_y_range {
-    my ($self, $market_data, $start_idx, $end_idx) = @_;
+sub _init_crosshair_objects {
+    my ($self) = @_;
+    my $c = $self->{canvas};
     
-    my $first_candle = $market_data->get_candle($start_idx);
-    return (0, 100) unless $first_candle; # Resguardo si no hay datos
-    
-    my $min = $first_candle->{low};
-    my $max = $first_candle->{high};
-    
-    for my $i ($start_idx .. $end_idx) {
-        my $candle = $market_data->get_candle($i);
-        next unless $candle;
-        
-        $min = $candle->{low}  if $candle->{low} < $min;
-        $max = $candle->{high} if $candle->{high} > $max;
-    }
-    
-    # Añadimos un pequeño margen (padding) del 5% arriba y abajo para que no tope los bordes
-    my $padding = ($max - $min) * 0.05;
-    $padding = 1 if $padding == 0; # Prevenir división por cero si el precio es plano
-    
-    return ($min - $padding, $max + $padding);
+    # Objetos gráficos del crosshair ocultos por defecto
+    $self->{crosshair}->{vline} = $c->createLine(0, 0, 0, 0, -fill => 'gray', -dash => '.', -state => 'hidden');
+    $self->{crosshair}->{hline} = $c->createLine(0, 0, 0, 0, -fill => 'gray', -dash => '.', -state => 'hidden');
+    $self->{crosshair}->{text}  = $c->createText(0, 0, -text => '', -fill => 'white', -state => 'hidden');
 }
 
-# Se encarga de transformar los datos crudos en figuras geométricas dentro del Canvas de Tk
+sub get_y_range {
+    my ($self, $data_slice) = @_;
+    return (0, 1) unless @$data_slice;
+
+    my $min_price = $data_slice->[0]->{low};
+    my $max_price = $data_slice->[0]->{high};
+
+    foreach my $candle (@$data_slice) {
+        $min_price = min($min_price, $candle->{low});
+        $max_price = max($max_price, $candle->{high});
+    }
+
+    my $padding = ($max_price - $min_price) * 0.05;
+    return ($min_price - $padding, $max_price + $padding);
+}
+
+sub set_scale {
+    my ($self, $scale) = @_;
+    $self->{scale} = $scale;
+}
+
 sub render {
-    my ($self, $canvas, $market_data, $scale, $start_idx, $end_idx) = @_;
+    my ($self, $data_slice) = @_;
+    my $c = $self->{canvas};
+    my $s = $self->{scale};
     
-    # Limpiar las velas dibujadas en el frame anterior para evitar sobreescribir memoria visual
-    $canvas->delete('candle'); 
+    return unless $s && @$data_slice;
 
-    for my $i ($start_idx .. $end_idx) {
-        my $candle = $market_data->get_candle($i);
-        next unless $candle;
+    # 1. Limpiar TODO el canvas antes de repintar
+    $c->delete('candle'); 
+    
+    # 2. DIBUJAR EL EJE Y FONDO PRIMERO (Para que quede detrás de las velas)
+    $self->draw_time_axis($data_slice);
 
-        # 1. Transformación lineal usando la clase Scales
-        my $x       = $scale->index_to_center_x($i); 
-        my $y_open  = $scale->value_to_y($candle->{open});
-        my $y_close = $scale->value_to_y($candle->{close});
-        my $y_high  = $scale->value_to_y($candle->{high});
-        my $y_low   = $scale->value_to_y($candle->{low});
-
-        # 2. Configuración de colores (Verde alcista / Rojo bajista)
-        my $color = ($candle->{close} >= $candle->{open}) ? '#089981' : '#F23645';
+    # 3. Dibujar las velas
+    for my $i (0 .. $#{$data_slice}) {
+        my $candle = $data_slice->[$i];
         
-        # Dibujar la mecha de la vela (Línea High -> Low)
-        $canvas->createLine(
-            $x, $y_high, $x, $y_low, 
+        my $x_left   = $s->index_to_x($i);
+        my $x_right  = $s->index_to_x($i + 1) - 1; 
+        my $x_center = $s->index_to_center_x($i);
+        
+        my $y_open  = $s->value_to_y($candle->{open});
+        my $y_close = $s->value_to_y($candle->{close});
+        my $y_high  = $s->value_to_y($candle->{high});
+        my $y_low   = $s->value_to_y($candle->{low});
+
+        my $color = ($candle->{close} >= $candle->{open}) ? 'green' : 'red';
+        
+        $c->createLine(
+            $x_center, $y_high, $x_center, $y_low, 
             -fill => $color, 
             -tags => 'candle'
         );
         
-        # Dibujar el cuerpo de la vela (Rectángulo Open -> Close)
-        my $candle_width = 3; 
-        
-        # Asegurar un grosor mínimo de 1 píxel para los Dojis (donde open == close)
-        if (abs($y_open - $y_close) < 1) {
-            $y_close = $y_open + 1; 
-        }
-        
-        $canvas->createRectangle(
-            $x - $candle_width, $y_open, 
-            $x + $candle_width, $y_close, 
-            -fill    => $color, 
+        $c->createRectangle(
+            $x_left, $y_open, $x_right, $y_close, 
+            -fill => $color, 
             -outline => $color, 
-            -tags    => 'candle'
+            -tags => 'candle'
         );
     }
+    
+    # 4. Dibujar la escala vertical de precios
+    $s->_draw_y_scale($c);
+    $self->render_last_visible_price($data_slice);
+}
+
+sub render_last_visible_price {
+    my ($self, $data_slice) = @_;
+    return unless @$data_slice;
+    my $last_candle = $data_slice->[-1];
+    my $y_pos = $self->{scale}->value_to_y($last_candle->{close});
 }
 
 sub draw_crosshair {
-    my ($self, $canvas, $x, $y, $is_active_panel, $scale) = @_;
+    my ($self, $x, $y) = @_;
+    my $c = $self->{canvas};
+    my $s = $self->{scale};
     
-    # Limpiamos el crosshair del frame anterior
-    $canvas->delete('crosshair');
+    if (!defined $x || !defined $y) {
+        $c->itemconfigure($self->{crosshair}->{vline}, -state => 'hidden');
+        $c->itemconfigure($self->{crosshair}->{hline}, -state => 'hidden');
+        $c->itemconfigure($self->{crosshair}->{text},  -state => 'hidden');
+        return;
+    }
+
+    my $price = $s->y_to_value($y);
+    my $display_price = sprintf("%.4f", $price);
+
+    my $width  = $s->{width};
+    my $height = $s->{height};
+
+    $c->coords($self->{crosshair}->{vline}, $x, 0, $x, $height);
+    $c->coords($self->{crosshair}->{hline}, 0, $y, $width, $y);
     
-    # Si las coordenadas son negativas (mouse fuera de pantalla), abortamos
-    return if $x < 0 || $y < 0;
+    $c->coords($self->{crosshair}->{text}, $width - 5, $y - 10);
+    $c->itemconfigure($self->{crosshair}->{text}, -text => $display_price);
+
+    $c->itemconfigure($self->{crosshair}->{vline}, -state => 'normal');
+    $c->itemconfigure($self->{crosshair}->{hline}, -state => 'normal');
+    $c->itemconfigure($self->{crosshair}->{text},  -state => 'normal');
+}
+
+sub draw_time_axis {
+    my ($self, $data_slice) = @_;
+    my $c = $self->{canvas};
+    my $s = $self->{scale};
     
-    my $height = $scale->{canvas_height};
-    my $width  = $canvas->width() || 1024;
+    return unless @$data_slice;
+
+    my $height = $s->{height};
     
-    # 1. DIBUJAR LÍNEA VERTICAL (Tiempo)
-    # Se dibuja siempre en ambos paneles para mantener la sincronización visual
-    $canvas->createLine(
-        $x, 0, $x, $height, 
-        -dash => '-', 
-        -fill => '#707a8a', 
-        -tags => 'crosshair'
-    );
+    $c->delete('time_axis');
     
-    # 2. DIBUJAR LÍNEA HORIZONTAL Y VALOR EXACTO (Precios/Indicadores)
-    # Solo se dibuja en el panel donde el usuario tiene el mouse
-    if ($is_active_panel) {
-        $canvas->createLine(
-            0, $y, $width - 80, $y, 
-            -dash => '-', 
-            -fill => '#707a8a', 
-            -tags => 'crosshair'
+    # 1. Reducimos el máximo de etiquetas de 8 a 5 o 6 para darles más "aire"
+    my $max_labels = 16; 
+    
+    my $step = int(scalar(@$data_slice) / $max_labels);
+    $step = 1 if $step < 1;
+
+    for (my $i = 0; $i < @$data_slice; $i += $step) {
+        my $candle = $data_slice->[$i];
+        
+        my $x = $s->index_to_center_x($i);
+        my $ts = $candle->{timestamp};
+        
+        # 2. TRUCO DE FORMATO: Acortar la cadena de texto (Regex)
+        # Busca el patrón YYYY-MM-DD HH:MM:SS
+        # y captura solo el Mes ($2), el Día ($3) y la Hora:Minuto ($4)
+        if ($ts =~ /(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})/) {
+            # Lo transformamos a formato corto legible: "DD/MM HH:MM"
+            $ts = "$3/$2 $4"; 
+        }
+        # (Si tu CSV tiene fechas con separador '/', ajusta el guion '-' por '\/' en el regex)
+        
+        # Dibujar línea de fondo
+        $c->createLine(
+            $x, 0, $x, $height, 
+            -fill => '#2a2e39', 
+            -dash => '.', 
+            -tags => 'time_axis'
         );
         
-        # Calcular el valor exacto usando la transformación inversa de Scales.pm
-        my $exact_value = $scale->y_to_value($y);
-        
-        # Dibujar un pequeño recuadro oscuro sobre el eje Y con el valor exacto
-        $canvas->createRectangle(
-            $width - 80, $y - 12, $width, $y + 12, 
-            -fill => '#2A2E39', 
-            -tags => 'crosshair'
-        );
-        $canvas->createText(
-            $width - 40, $y, 
-            -text => sprintf("%.2f", $exact_value), 
-            -fill => 'white', 
-            -font => 'Arial 9 bold',
-            -tags => 'crosshair'
+        # Dibujar texto
+        $c->createText(
+            $x, $height - 10, 
+            -text => $ts, 
+            -fill => '#d1d4dc', 
+            -anchor => 's',     
+            -tags => 'time_axis'
         );
     }
 }
 
-# --- Esqueletos requeridos por la rúbrica para evitar futuros crashes ---
-sub _init_crosshair_objects   { my ($self) = @_; }
-sub round                     { my ($self, $value) = @_; return int($value + 0.5); }
-sub render_last_visible_price { my ($self, $canvas) = @_; }
-sub set_scale                 { my ($self, $scale) = @_; }
-sub draw_time_axis            { my ($self, $canvas, $timestamps) = @_; }
 
 1;

@@ -1,96 +1,123 @@
 #!/usr/bin/perl
+
 use strict;
 use warnings;
+use lib '/home/davidandresvm/Documentos/Proyecto_IB_G';
 
-use FindBin;           # Localiza el directorio exacto donde está guardado market.pl
-use lib $FindBin::Bin; # Añade ese directorio a la variable @INC
 
-# 1. Importar librerías del sistema y módulos personalizados
-use Tk;                # ¡CORRECCIÓN! Necesario para MainWindow y Canvas
-use Text::CSV; 
+use FindBin;
+use lib $FindBin::Bin;
 
+use Tk;
 use Market::MarketData;
 use Market::IndicatorManager;
-use Market::ChartEngine;
 use Market::Indicators::ATR;
+use Market::ChartEngine;
 
-# 2. Crear ventana principal de la interfaz gráfica
+# ==============================================================================
+# 1. Configuración de la Ventana Principal Tk
+# ==============================================================================
 my $mw = MainWindow->new;
-$mw->title("Gráficos Financieros con Perl y Tk - Proyecto de Machine Learning");
+$mw->title("Motor de Graficos Financieros - Visualizacion de Datos");
+$mw->geometry("1200x1000");
 
-# Eliminado $mw->geometry y uso el atributo zoomed
-$mw->attributes('-zoomed' => 1);
-
-# 3. Instanciar Capa de Datos y Gestor de Indicadores
-# ¡CORRECCIÓN! Se unificó y eliminó la doble declaración de $data
-my $data = Market::MarketData->new();
-my $indicator_mgr = Market::IndicatorManager->new();
-
-# Registramos el indicador ATR antes de procesar los datos históricos
-$indicator_mgr->register('ATR', Market::Indicators::ATR->new(14));
-
-# 4. Ingesta y lectura del dataset histórico
-open my $fh, '<', '2026_03.csv' or die "No se pudo abrir el archivo: $!";
-my $header = <$fh>; # Saltar la cabecera del archivo CSV
-
-while (my $line = <$fh>) {
-    chomp $line;
-    my ($timestamp, $open, $high, $low, $close, $volume) = split /,/, $line;
-    
-    $data->add_candle({
-        timestamp => $timestamp,
-        open      => $open,
-        high      => $high,
-        low       => $low,
-        close     => $close,
-        volume    => $volume
-    });
-    
-    
-}
-close $fh;
-# Preprocesamiento: Construir las matrices de 5m y 15m
-$data->build_timeframes();
-
-# Calcular los indicadores completos de la temporalidad por defecto (1m)
-$indicator_mgr->recompute_all($data);
+# ==============================================================================
+# NUEVO: Barra de Herramientas Superior
+# ==============================================================================
 
 
-# 5. Crear la Barra de Herramientas (Toolbar) en la parte superior
-my $toolbar = $mw->Frame(-background => '#E0E3EB')->pack(-side => 'top', -fill => 'x');
+# Declaramos la variable de forma adelantada para que los botones sepan que existirá
+my $engine; 
 
-# 6. Crear los Canvas (Paneles de Precio y ATR) justo debajo del Toolbar
-my $price_canvas = $mw->Canvas(-background => 'white')->pack(-expand => 1, -fill => 'both');
-my $atr_canvas   = $mw->Canvas(-background => '#f0f0f0', -height => 150)->pack(-fill => 'x');
+# ==============================================================================
+# NUEVO: Barra de Herramientas Superior
+# ==============================================================================
+my $toolbar = $mw->Frame(-bg => '#131722')->pack(-fill => 'x', -side => 'top');
 
-# 7. Inicializar el Motor de Gráficos Financieros
-my $engine = Market::ChartEngine->new(
-    market_data       => $data,
-    indicator_manager => $indicator_mgr,
-    canvases          => { price => $price_canvas, atr => $atr_canvas }
-);
 
-# 8. Agregar Botones de Temporalidad al Toolbar
-# Los botones se empaquetan a la izquierda (-side => 'left') y llaman al método del motor
+# Crear botones para cambiar la temporalidad
 $toolbar->Button(
-    -text    => "1m", 
-    -command => sub { $engine->set_timeframe('1m'); },
-    -relief  => 'groove'
+    -text => '1 Minuto', 
+    -command => sub { $engine->set_timeframe('1m') }
 )->pack(-side => 'left', -padx => 5, -pady => 5);
 
 $toolbar->Button(
-    -text    => "5m", 
-    -command => sub { $engine->set_timeframe('5m'); },
-    -relief  => 'groove'
-)->pack(-side => 'left', -padx => 2, -pady => 5);
+    -text => '5 Minutos', 
+    -command => sub { $engine->set_timeframe('5m') }
+)->pack(-side => 'left', -padx => 5, -pady => 5);
 
 $toolbar->Button(
-    -text    => "15m", 
-    -command => sub { $engine->set_timeframe('15m'); },
-    -relief  => 'groove'
-)->pack(-side => 'left', -padx => 2, -pady => 5);
+    -text => '15 Minutos', 
+    -command => sub { $engine->set_timeframe('15m') }
+)->pack(-side => 'left', -padx => 5, -pady => 5);
 
-# 9. Renderizar el estado inicial de la ventana y arrancar el ciclo de vida de Tk
-$mw->update; # <--- Obliga a calcular el tamaño real de la pantalla)
+
+# Creación de los Canvases (Paneles Visuales)
+my $price_canvas = $mw->Canvas(-bg => '#131722', -height => 600)->pack(-fill => 'both', -expand => 1);
+my $atr_canvas   = $mw->Canvas(-bg => '#131722', -height => 200)->pack(-fill => 'x');
+
+# ==============================================================================
+# 2. Inicialización de Capas de Datos e Indicadores
+# ==============================================================================
+my $market = Market::MarketData->new();
+my $indicators = Market::IndicatorManager->new();
+
+# Registrar el indicador ATR con un periodo estándar de 14 [cite: 612]
+$indicators->register('ATR', Market::Indicators::ATR->new(14));
+
+# ==============================================================================
+# 3. Lectura y Carga de Datos (CSV) [cite: 610]
+# ==============================================================================
+my $csv_file = $FindBin::Bin . '/Data/datos.csv'; # <-- CAMBIA ESTO AL NOMBRE EXACTO DE TU ARCHIVO
+
+print "Iniciando lectura de datos desde '$csv_file'...\n";
+open(my $fh, '<', $csv_file) or die "Error: No se pudo abrir el archivo CSV '$csv_file': $!\n";
+
+# Leer y descartar la primera línea si contiene las cabeceras (Timestamp, Open...)
+my $header = <$fh>; 
+
+while (my $line = <$fh>) {
+    chomp $line;
+    
+    # Parsear las columnas (Ajustar el split a ';' si tu CSV está delimitado por punto y coma)
+    my ($ts, $open, $high, $low, $close, $volume) = split(/,/, $line);
+    
+    # Invocar la entrada de datos asegurando que los valores se traten como números [cite: 610]
+    $market->add_candle({
+        timestamp => $ts,
+        open      => $open + 0,
+        high      => $high + 0,
+        low       => $low  + 0,
+        close     => $close + 0,
+        volume    => $volume + 0,
+    });
+    
+    # Invocar la actualización de indicadores en streaming (vela por vela) [cite: 612]
+    $indicators->update_last($market);
+}
+close($fh);
+
+print "Carga completada. Total de velas base: " . $market->size() . "\n";
+
+# Invocar la actualización del mercado construyendo las agregaciones temporales [cite: 611]
+$market->build_timeframes();
+
+# ==============================================================================
+# 4. Inicialización del Motor de Renderizado y Bucle de Eventos [cite: 608]
+# ==============================================================================
+$engine = Market::ChartEngine->new(
+    mw           => $mw,
+    market_data  => $market,
+    indicators   => $indicators,
+    price_canvas => $price_canvas,
+    atr_canvas   => $atr_canvas,
+);
+
+# Obligar a Tk a calcular las dimensiones internas de la ventana antes de dibujar
+$mw->update();
+
+# Dibuja el primer chart en la interfaz [cite: 613]
 $engine->request_render();
+
+# Iniciar el ciclo principal de ejecución de la interfaz gráfica [cite: 608]
 MainLoop;
