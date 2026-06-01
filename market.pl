@@ -19,7 +19,7 @@ use Market::ChartEngine;
 # ==============================================================================
 my $mw = MainWindow->new;
 $mw->title("Motor de Graficos Financieros - Visualizacion de Datos");
-$mw->geometry("1200x1000");
+$mw->attributes('-zoomed' => 1);
 
 # ==============================================================================
 # NUEVO: Barra de Herramientas Superior
