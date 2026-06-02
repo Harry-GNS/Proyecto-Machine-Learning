@@ -88,7 +88,7 @@ sub _draw_y_scale {
         my $val = $self->{min_val} + ($i * $step);
         my $y_pos = $self->value_to_y($val);
         
-        my $display_val = sprintf("%.4f", $val);
+        my $display_val = sprintf("%.2f", $val);
         
         # 2. Dibujar el texto asegurándonos de asignarle el tag 'y_scale'
         $canvas->createText(

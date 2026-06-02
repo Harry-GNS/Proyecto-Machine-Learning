@@ -107,7 +107,6 @@ sub draw_crosshair {
     my $c = $self->{canvas};
     my $s = $self->{scale};
     
-    # 1. Si el ratón sale, ocultar todo
     if (!defined $x || !$s) {
         my @hide_keys = qw(vline hline y_bg y_text);
         foreach my $key (@hide_keys) {
@@ -125,14 +124,14 @@ sub draw_crosshair {
     $c->coords($self->{crosshair}->{vline}, $x, 0, $x, $height);
     $c->itemconfigure($self->{crosshair}->{vline}, -state => 'normal');
     
-    # Extraer el valor exacto del ATR para la vela actual (Esquina superior izquierda)
     if ($self->{current_slice}) {
         my $candle_width = $width / $s->{visible_bars};
         my $local_index = int(($x / $candle_width) + $s->{offset});
         
         if ($local_index >= 0 && $local_index < @{$self->{current_slice}}) {
             my $val = $self->{current_slice}->[$local_index];
-            my $str = defined $val ? sprintf("ATR: %.4f", $val) : "ATR: N/A";
+            # CAMBIADO A %.2f
+            my $str = defined $val ? sprintf("ATR: %.2f", $val) : "ATR: N/A";
             $c->itemconfigure($self->{crosshair}->{info_text}, -text => $str);
         }
     }
@@ -141,17 +140,15 @@ sub draw_crosshair {
     # EJE Y (Valor en el lado derecho con escala 0.25)
     # ==========================================
     if (defined $y) {
-        # 1. Obtener valor y redondearlo a la escala de 0.25
         my $raw_val = $s->y_to_value($y);
         my $val = int($raw_val / 0.25 + 0.5) * 0.25;
-        
-        # 2. Efecto Imán (Snap): Recalcular la coordenada 'Y' 
         my $snapped_y = $s->value_to_y($val);
 
         $c->coords($self->{crosshair}->{hline}, 0, $snapped_y, $width, $snapped_y);
         $c->itemconfigure($self->{crosshair}->{hline}, -state => 'normal');
         
-        my $display_val = sprintf("%.4f", $val);
+        # CAMBIADO A %.2f
+        my $display_val = sprintf("%.2f", $val);
         
         $c->coords($self->{crosshair}->{y_text}, $width - 5, $snapped_y);
         $c->itemconfigure($self->{crosshair}->{y_text}, -text => $display_val, -state => 'normal');
@@ -162,15 +159,11 @@ sub draw_crosshair {
             $c->itemconfigure($self->{crosshair}->{y_bg}, -state => 'normal');
         }
     } else {
-        # Ocultar etiquetas horizontales si el puntero está en el panel de arriba
         $c->itemconfigure($self->{crosshair}->{hline}, -state => 'hidden');
         $c->itemconfigure($self->{crosshair}->{y_bg},  -state => 'hidden');
         $c->itemconfigure($self->{crosshair}->{y_text}, -state => 'hidden');
     }
 
-    # ==========================================
-    # ORDEN DE CAPAS FRONTALES
-    # ==========================================
     $c->raise($self->{crosshair}->{vline});
     $c->raise($self->{crosshair}->{info_text});
     

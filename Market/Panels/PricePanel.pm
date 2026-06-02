@@ -126,48 +126,37 @@ sub render_last_visible_price {
     my ($self, $data_slice) = @_;
     my $c = $self->{canvas};
 
-    # 1. Limpiar cualquier etiqueta de precio anterior dibujada
     $c->delete('last_price_label');
-
     return unless @$data_slice;
 
-    # Extraer datos de la última vela visible
     my $last_candle = $data_slice->[-1];
     my $price = $last_candle->{close};
     my $y_pos = $self->{scale}->value_to_y($price);
     my $width = $self->{scale}->{width};
 
-    # 2. Determinar el color: Verde si el cierre es mayor o igual a la apertura, Rojo si es menor
     my $color = ($price >= $last_candle->{open}) ? '#089981' : '#F23645';
 
-    # Formatear el precio a 4 decimales
-    my $display_val = sprintf("%.4f", $price);
+    # CAMBIADO A %.2f
+    my $display_val = sprintf("%.2f", $price);
 
-    # 3. Dibujar el texto primero para poder obtener sus dimensiones (bbox)
     my $text_id = $c->createText(
         $width - 5, $y_pos,
         -text   => $display_val,
         -fill   => 'white',
-        -anchor => 'e', # Alineado al este (derecha)
+        -anchor => 'e',
         -font   => ['Helvetica', 10, 'bold'],
         -tags   => 'last_price_label'
     );
 
-    # 4. Obtener la caja delimitadora (bbox) que ocupa el texto para dibujar su fondo
     my @bbox = $c->bbox($text_id);
     if (@bbox) {
-        # Agregar padding: 4px a los lados, 2px arriba y abajo
         my ($x1, $y1, $x2, $y2) = ($bbox[0] - 4, $bbox[1] - 2, $bbox[2] + 4, $bbox[3] + 2);
-
-        # Dibujar el rectángulo de fondo
         my $bg_id = $c->createRectangle(
             $x1, $y1, $x2, $y2,
             -fill    => $color,
             -outline => $color,
             -tags    => 'last_price_label'
         );
-
-        # 5. Mover el rectángulo detrás del texto para que este sea visible
         $c->lower($bg_id, $text_id);
     }
 }
@@ -181,7 +170,8 @@ sub draw_crosshair {
     if (!defined $x || !$s || !$self->{current_slice}) {
         if (exists $self->{crosshair}->{ohlc_text} && $self->{current_slice} && @{$self->{current_slice}}) {
             my $last = $self->{current_slice}->[-1];
-            my $ohlc_str = sprintf("O: %.4f   H: %.4f   L: %.4f   C: %.4f", 
+            # CAMBIADO A %.2f
+            my $ohlc_str = sprintf("O: %.2f   H: %.2f   L: %.2f   C: %.2f", 
                                     $last->{open}, $last->{high}, $last->{low}, $last->{close});
             $c->itemconfigure($self->{crosshair}->{ohlc_text}, -text => $ohlc_str);
             $c->raise($self->{crosshair}->{ohlc_text});
@@ -216,9 +206,9 @@ sub draw_crosshair {
             $ts = "$3/$2 $4"; 
         }
         
-        # OHLC interactivo
+        # OHLC interactivo - CAMBIADO A %.2f
         if (exists $self->{crosshair}->{ohlc_text}) {
-            my $ohlc_str = sprintf("O: %.4f   H: %.4f   L: %.4f   C: %.4f", 
+            my $ohlc_str = sprintf("O: %.2f   H: %.2f   L: %.2f   C: %.2f", 
                                     $hovered_candle->{open}, $hovered_candle->{high}, 
                                     $hovered_candle->{low}, $hovered_candle->{close});
             $c->itemconfigure($self->{crosshair}->{ohlc_text}, -text => $ohlc_str);
@@ -240,20 +230,15 @@ sub draw_crosshair {
     # EJE Y: Solo se dibuja si el ratón está aquí
     # ==========================================
     if (defined $y) {
-        # 1. Obtener el valor crudo (exacto) de la posición del ratón
         my $raw_val = $s->y_to_value($y);
-        
-        # 2. Redondear ese valor a la escala de 0.25
         my $val = int($raw_val / 0.25 + 0.5) * 0.25;
-        
-        # 3. Efecto Imán (Snap): Recalcular la coordenada 'Y' en base al valor redondeado
         my $snapped_y = $s->value_to_y($val);
 
-        # Usamos $snapped_y en lugar del $y del ratón para dibujar
         $c->coords($self->{crosshair}->{hline}, 0, $snapped_y, $width, $snapped_y);
         $c->itemconfigure($self->{crosshair}->{hline}, -state => 'normal');
         
-        my $display_val = sprintf("%.4f", $val);
+        # CAMBIADO A %.2f
+        my $display_val = sprintf("%.2f", $val);
         
         $c->coords($self->{crosshair}->{y_text}, $width - 5, $snapped_y);
         $c->itemconfigure($self->{crosshair}->{y_text}, -text => $display_val, -state => 'normal');
@@ -264,15 +249,11 @@ sub draw_crosshair {
             $c->itemconfigure($self->{crosshair}->{y_bg}, -state => 'normal');
         }
     } else {
-        # Ocultamos la línea horizontal y la etiqueta de precio
         $c->itemconfigure($self->{crosshair}->{hline}, -state => 'hidden');
         $c->itemconfigure($self->{crosshair}->{y_bg},  -state => 'hidden');
         $c->itemconfigure($self->{crosshair}->{y_text}, -state => 'hidden');
     }
 
-    # ==========================================
-    # ORGANIZACIÓN DE CAPAS FRONTALES
-    # ==========================================
     $c->raise($self->{crosshair}->{vline});
     $c->raise($self->{crosshair}->{x_bg});
     $c->raise($self->{crosshair}->{x_text});
