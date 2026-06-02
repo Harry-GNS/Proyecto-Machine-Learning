@@ -197,22 +197,24 @@ sub bind_events {
         Tk->break; 
     });
 
-    # Evento: Clic izquierdo (Establecer el ancla)
+    # =========================================================
+    # EVENTOS DE ARRASTRE PRINCIPAL (PRECIOS)
+    # =========================================================
     $self->{price_canvas}->Tk::bind('<ButtonPress-1>', sub {
         my ($c) = @_;
         my $ev = $c->XEvent;
-        $self->_on_drag_start($ev->x);
+        # Enviamos la posición X, Y, y el ancho total de la pantalla
+        $self->_on_drag_start($ev->x, $ev->y, $c->width);
     });
 
-    # Evento: Arrastre con clic izquierdo sostenido (Mover el gráfico)
     $self->{price_canvas}->Tk::bind('<B1-Motion>', sub {
         my ($c) = @_;
         my $ev = $c->XEvent;
-        $self->_on_drag_motion($ev->x);
-        
-        # Opcional: Actualizar el crosshair mientras se arrastra
+        $self->_on_drag_motion($ev->x, $ev->y);
         $self->_on_mouse_move($ev->x, $ev->y, 'price');
     });
+
+    
 
     # Evento: Clic derecho (Ancla para arrastre vertical)
     $self->{price_canvas}->Tk::bind('<ButtonPress-3>', sub {
@@ -246,23 +248,20 @@ sub bind_events {
     # ARRASTRE HORIZONTAL EN EL PANEL ATR
     # =========================================================
     
-    # Evento: Clic izquierdo en el ATR (Establecer el ancla)
+    # =========================================================
+    # EVENTOS DE ARRASTRE SECUNDARIO (ATR)
+    # =========================================================
     $self->{atr_canvas}->Tk::bind('<ButtonPress-1>', sub {
         my ($c) = @_;
         my $ev = $c->XEvent;
-        # Reutilizamos la misma función de anclaje
-        $self->_on_drag_start($ev->x);
+        # Pasamos 'undef' en Y y Width para forzar que el ATR solo se mueva horizontalmente
+        $self->_on_drag_start($ev->x, undef, undef); 
     });
 
-    # Evento: Arrastre con clic izquierdo sostenido en el ATR
     $self->{atr_canvas}->Tk::bind('<B1-Motion>', sub {
         my ($c) = @_;
         my $ev = $c->XEvent;
-        
-        # Reutilizamos la misma lógica matemática de desplazamiento
-        $self->_on_drag_motion($ev->x);
-        
-        # Actualizamos el crosshair indicando que estamos en el panel 'atr'
+        $self->_on_drag_motion($ev->x, undef);
         $self->_on_mouse_move($ev->x, $ev->y, 'atr');
     });
 
@@ -293,31 +292,85 @@ sub _on_mouse_move {
 
 
 sub _on_drag_start {
-    my ($self, $x) = @_;
-    # Guardamos la posición exacta en píxeles donde el usuario hizo clic
-    $self->{drag_start_x} = $x;
-    # Guardamos en qué vela (índice) estaba posicionado el gráfico
-    $self->{drag_start_offset} = $self->{offset};
+    my ($self, $x, $y, $width) = @_;
+    
+    # Asignamos el área sensible de la escala a los últimos 70 píxeles derechos
+    my $escala_sensible = 70;
+    
+    # ¿Hizo clic en la escala de precios? (Tiene que existir $width, $y, y estar a la derecha)
+    if (defined $width && defined $y && $x > ($width - $escala_sensible)) {
+        
+        $self->{drag_mode} = 'vertical';
+        $self->{drag_start_y} = $y;
+        
+        # Congelar la escala automática (Modo Manual) para permitir el estiramiento
+        if ($self->{auto_scale_y}) {
+            my ($start, $end) = $self->compute_window();
+            my $slice = $self->{market_data}->get_slice($start, $end);
+            ($self->{manual_min_y}, $self->{manual_max_y}) = $self->{price_panel}->get_y_range($slice);
+            $self->{auto_scale_y} = 0; 
+        }
+        
+    } else {
+        
+        # Clic normal en la gráfica: Modo Paneo en el Tiempo
+        $self->{drag_mode} = 'horizontal';
+        $self->{drag_start_x} = $x;
+        $self->{drag_start_offset} = $self->{offset};
+    }
 }
 
 sub _on_drag_motion {
-    my ($self, $x) = @_;
+    my ($self, $x, $y) = @_;
     
-    my $dx = $self->{drag_start_x} - $x;
-    
-    my $canvas_width = $self->{price_canvas}->width;
-    my $candle_width = $canvas_width / $self->{visible_bars};
-    
-    return if $candle_width == 0; 
-    
-    # Mantenemos el desplazamiento como un valor decimal continuo (flotante)
-    my $fractional_shift = $dx / $candle_width;
-    my $new_offset = $self->{drag_start_offset} + $fractional_shift;
-    
-    if ($new_offset != $self->{offset}) {
-        $self->{offset} = $new_offset;
-        $self->_clamp_offset(); # <-- Usa la nueva función
+    if ($self->{drag_mode} eq 'vertical') {
+        # =============================================
+        # LÓGICA DE ESTIRAMIENTO VERTICAL (ZOOM Y)
+        # =============================================
+        return unless defined $y;
+        
+        # Distancia en píxeles que moviste el ratón desde el ancla
+        my $dy = $y - $self->{drag_start_y};
+        my $height = $self->{price_canvas}->height;
+        return if $height == 0;
+        
+        my $current_range = $self->{manual_max_y} - $self->{manual_min_y};
+        return if $current_range <= 0;
+        
+        # Factor de deformación proporcional al rango visible
+        my $zoom_factor = ($dy / $height) * $current_range;
+        
+        # Arrastrar arriba estira los precios (zoom in), abajo los comprime (zoom out)
+        $self->{manual_max_y} += $zoom_factor;
+        $self->{manual_min_y} -= $zoom_factor;
+        
+        # Protección de seguridad para evitar que el gráfico se invierta si arrastraste mucho
+        if ($self->{manual_max_y} <= $self->{manual_min_y}) {
+            $self->{manual_max_y} -= $zoom_factor;
+            $self->{manual_min_y} += $zoom_factor;
+        }
+        
+        # Reiniciar el punto de inicio para que el movimiento arrastrado sea fluido fotograma a fotograma
+        $self->{drag_start_y} = $y;
         $self->request_render();
+        
+    } else {
+        # =============================================
+        # LÓGICA DE PANEO HORIZONTAL (TIEMPO NORMAL)
+        # =============================================
+        my $dx = $self->{drag_start_x} - $x;
+        my $width = $self->{price_canvas}->width;
+        return if $width == 0;
+        
+        my $candle_width = $width / $self->{visible_bars};
+        my $fractional_shift = $dx / $candle_width;
+        my $new_offset = $self->{drag_start_offset} + $fractional_shift;
+        
+        if ($new_offset != $self->{offset}) {
+            $self->{offset} = $new_offset;
+            $self->_clamp_offset(); 
+            $self->request_render();
+        }
     }
 }
 
