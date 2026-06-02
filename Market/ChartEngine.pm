@@ -155,7 +155,7 @@ sub bind_events {
         $self->_on_mouse_move($ev->x, $ev->y, 'atr');
     });
 
-# =========================================================
+    # =========================================================
     # 1. Zoom Horizontal Normal (Anclado a la vela más reciente)
     # =========================================================
     $self->{price_canvas}->Tk::bind('<Button-4>', sub { 
@@ -254,6 +254,15 @@ sub bind_events {
         $self->reset_view();
     });
 
+    # NUEVO: Navegación por teclado (Flechas)
+    # =========================================================
+    # El bind se hace al MainWindow para capturarlo sin necesidad de dar clic previo
+    $self->{mw}->Tk::bind('<Left>',  sub { $self->_pan_horizontal(1); });  # Ver pasado
+    $self->{mw}->Tk::bind('<Right>', sub { $self->_pan_horizontal(-1); }); # Ver futuro
+    $self->{mw}->Tk::bind('<Up>',    sub { $self->_pan_vertical(-1); });   # Desplazar gráfico arriba
+    $self->{mw}->Tk::bind('<Down>',  sub { $self->_pan_vertical(1); });    # Desplazar gráfico abajo
+
+
 }
 
 sub _on_mouse_move {
@@ -335,8 +344,10 @@ sub _vertical_drag {
 
 sub reset_view {
     my ($self) = @_;
-    # Volver al modo automático
+    # Volver al estado original (Modo automático, sin offset y zoom por defecto)
     $self->{auto_scale_y} = 1;
+    $self->{offset}       = 0;
+    $self->{visible_bars} = 100; # Velas por defecto al abrir
     $self->request_render();
 }
 
@@ -462,5 +473,66 @@ sub _vertical_zoom {
 
     $self->request_render();
 }
+# ==============================================================================
+# NUEVAS FUNCIONES: Auto/Manual y Paneo por Teclado
+# ==============================================================================
+
+sub toggle_auto_scale {
+    my ($self) = @_;
+    
+    if ($self->{auto_scale_y}) {
+        # Si estaba en automático, pasamos a manual congelando el rango visual actual
+        my ($start, $end) = $self->compute_window();
+        my $slice = $self->{market_data}->get_slice($start, $end);
+        ($self->{manual_min_y}, $self->{manual_max_y}) = $self->{price_panel}->get_y_range($slice);
+        
+        $self->{auto_scale_y} = 0; # Cambiar a Manual
+    } else {
+        # Si estaba en manual, volvemos a automático
+        $self->{auto_scale_y} = 1;
+    }
+    
+    $self->request_render();
+    return $self->{auto_scale_y};
+}
+
+sub _pan_horizontal {
+    my ($self, $direction) = @_;
+    
+    # Nos movemos un 10% de la cantidad de velas que se ven en pantalla
+    my $step = $self->{visible_bars} * 0.1;
+    $step = 1 if $step < 1; # Mínimo moverse 1 vela
+    
+    my $new_offset = $self->{offset} + ($direction * $step);
+    
+    # Protecciones para no salir del arreglo de datos
+    $new_offset = 0 if $new_offset < 0;
+    my $max_offset = $self->{market_data}->size() - $self->{visible_bars};
+    $new_offset = $max_offset if $new_offset > $max_offset && $max_offset > 0;
+    
+    if ($new_offset != $self->{offset}) {
+        $self->{offset} = $new_offset;
+        $self->request_render();
+    }
+}
+
+sub _pan_vertical {
+    my ($self, $direction) = @_;
+    
+    # El paneo vertical (arriba/abajo) solo tiene sentido si estamos en MODO MANUAL
+    return if $self->{auto_scale_y};
+    
+    my $rango = $self->{manual_max_y} - $self->{manual_min_y};
+    
+    # Desplazamos la vista un 10% del rango de precios actual
+    my $shift = $rango * 0.1 * $direction;
+    
+    $self->{manual_min_y} += $shift;
+    $self->{manual_max_y} += $shift;
+    
+    $self->request_render();
+}
+
+
 
 1;

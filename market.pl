@@ -19,7 +19,7 @@ use Market::ChartEngine;
 # ==============================================================================
 my $mw = MainWindow->new;
 $mw->title("Motor de Graficos Financieros - Visualizacion de Datos");
-$mw->geometry("1200x1000");
+$mw->attributes('-zoomed' => 1);
 
 # ==============================================================================
 # NUEVO: Barra de Herramientas Superior
@@ -51,6 +51,27 @@ $toolbar->Button(
     -command => sub { $engine->set_timeframe('15m') }
 )->pack(-side => 'left', -padx => 5, -pady => 5);
 
+# ==============================================================================
+# NUEVO: Botones de Reset y Modo (Auto/Manual)
+# ==============================================================================
+# Variable para que el texto del botón cambie dinámicamente
+my $modo_texto = "Modo: Automático";
+
+$toolbar->Button(
+    -textvariable => \$modo_texto, 
+    -command => sub { 
+        my $es_auto = $engine->toggle_auto_scale();
+        $modo_texto = $es_auto ? "Modo: Automático" : "Modo: Manual";
+    }
+)->pack(-side => 'left', -padx => 20, -pady => 5);
+
+$toolbar->Button(
+    -text => 'Reset', 
+    -command => sub { 
+        $engine->reset_view(); 
+        $modo_texto = "Modo: Automatico"; # Al resetear, siempre vuelve a automático
+    }
+)->pack(-side => 'left', -padx => 5, -pady => 5);
 
 # Creación de los Canvases (Paneles Visuales)
 my $price_canvas = $mw->Canvas(-bg => '#131722', -height => 600)->pack(-fill => 'both', -expand => 1);
