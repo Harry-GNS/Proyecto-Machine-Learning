@@ -242,6 +242,30 @@ sub bind_events {
         $self->reset_view();
     });
 
+    # =========================================================
+    # ARRASTRE HORIZONTAL EN EL PANEL ATR
+    # =========================================================
+    
+    # Evento: Clic izquierdo en el ATR (Establecer el ancla)
+    $self->{atr_canvas}->Tk::bind('<ButtonPress-1>', sub {
+        my ($c) = @_;
+        my $ev = $c->XEvent;
+        # Reutilizamos la misma función de anclaje
+        $self->_on_drag_start($ev->x);
+    });
+
+    # Evento: Arrastre con clic izquierdo sostenido en el ATR
+    $self->{atr_canvas}->Tk::bind('<B1-Motion>', sub {
+        my ($c) = @_;
+        my $ev = $c->XEvent;
+        
+        # Reutilizamos la misma lógica matemática de desplazamiento
+        $self->_on_drag_motion($ev->x);
+        
+        # Actualizamos el crosshair indicando que estamos en el panel 'atr'
+        $self->_on_mouse_move($ev->x, $ev->y, 'atr');
+    });
+
     # NUEVO: Navegación por teclado (Flechas)
     # =========================================================
     # El bind se hace al MainWindow para capturarlo sin necesidad de dar clic previo
