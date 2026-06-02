@@ -55,7 +55,7 @@ $toolbar->Button(
 # NUEVO: Botones de Reset y Modo (Auto/Manual)
 # ==============================================================================
 # Variable para que el texto del botón cambie dinámicamente
-my $modo_texto = "Modo: Automático";
+my $modo_texto = "Modo: Automatico";
 
 $toolbar->Button(
     -textvariable => \$modo_texto, 

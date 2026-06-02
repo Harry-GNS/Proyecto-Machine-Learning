@@ -124,9 +124,52 @@ sub render {
 
 sub render_last_visible_price {
     my ($self, $data_slice) = @_;
+    my $c = $self->{canvas};
+
+    # 1. Limpiar cualquier etiqueta de precio anterior dibujada
+    $c->delete('last_price_label');
+
     return unless @$data_slice;
+
+    # Extraer datos de la última vela visible
     my $last_candle = $data_slice->[-1];
-    my $y_pos = $self->{scale}->value_to_y($last_candle->{close});
+    my $price = $last_candle->{close};
+    my $y_pos = $self->{scale}->value_to_y($price);
+    my $width = $self->{scale}->{width};
+
+    # 2. Determinar el color: Verde si el cierre es mayor o igual a la apertura, Rojo si es menor
+    my $color = ($price >= $last_candle->{open}) ? '#089981' : '#F23645';
+
+    # Formatear el precio a 4 decimales
+    my $display_val = sprintf("%.4f", $price);
+
+    # 3. Dibujar el texto primero para poder obtener sus dimensiones (bbox)
+    my $text_id = $c->createText(
+        $width - 5, $y_pos,
+        -text   => $display_val,
+        -fill   => 'white',
+        -anchor => 'e', # Alineado al este (derecha)
+        -font   => ['Helvetica', 10, 'bold'],
+        -tags   => 'last_price_label'
+    );
+
+    # 4. Obtener la caja delimitadora (bbox) que ocupa el texto para dibujar su fondo
+    my @bbox = $c->bbox($text_id);
+    if (@bbox) {
+        # Agregar padding: 4px a los lados, 2px arriba y abajo
+        my ($x1, $y1, $x2, $y2) = ($bbox[0] - 4, $bbox[1] - 2, $bbox[2] + 4, $bbox[3] + 2);
+
+        # Dibujar el rectángulo de fondo
+        my $bg_id = $c->createRectangle(
+            $x1, $y1, $x2, $y2,
+            -fill    => $color,
+            -outline => $color,
+            -tags    => 'last_price_label'
+        );
+
+        # 5. Mover el rectángulo detrás del texto para que este sea visible
+        $c->lower($bg_id, $text_id);
+    }
 }
 
 sub draw_crosshair {
