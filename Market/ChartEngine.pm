@@ -10,31 +10,37 @@ use Market::Panels::ATRPanel;
 
 sub new {
     my ($class, %args) = @_;
+    
+    # Empezamos asumiendo 100 velas y un margen del 15%
+    my $total_candles = $args{market_data}->size();
+    my $visible_bars = 100;
+    my $margin = $visible_bars * 0.15;
+    
     my $self = {
-        mw           => $args{mw},            # MainWindow de Tk
-        market_data  => $args{market_data},   # Referencia a la capa de datos
-        indicators   => $args{indicators},    # Referencia al IndicatorManager
-        price_canvas => $args{price_canvas},  # Widget Tk
-        atr_canvas   => $args{atr_canvas},    # Widget Tk
+        mw           => $args{mw},
+        market_data  => $args{market_data},
+        indicators   => $args{indicators},
+        price_canvas => $args{price_canvas},
+        atr_canvas   => $args{atr_canvas},
         
-        # Estado interno de la vista [cite: 486]
-        offset       => 0,   # Desplazamiento horizontal
-        visible_bars => 100, # Zoom horizontal (velas en pantalla)
-        render_flag  => 0,   # Flag para evitar renders redundantes 
+        # INICIO AL FINAL DE LA DATA + MARGEN
+        offset       => $total_candles - $visible_bars + $margin, 
+        visible_bars => $visible_bars,
+        render_flag  => 0,
         
-        # Variables para el arrastre del ratón
         drag_start_x      => 0,
         drag_start_offset => 0,
 
-        # Estado de escala vertical
-        auto_scale_y   => 1, # 1 = Automático, 0 = Manual
+        auto_scale_y   => 1, 
         manual_min_y   => 0,
         manual_max_y   => 0,
-        drag_start_y   => 0, # Ancla vertical para el ratón
+        drag_start_y   => 0,
     };
     bless $self, $class;
 
-    # Instanciar los paneles [cite: 487]
+    # Ajustar a los límites si por algún motivo hay muy poca data
+    $self->_clamp_offset();
+
     $self->{price_panel} = Market::Panels::PricePanel->new(canvas => $self->{price_canvas});
     $self->{atr_panel}   = Market::Panels::ATRPanel->new(canvas => $self->{atr_canvas});
 
@@ -45,16 +51,14 @@ sub new {
 sub compute_window {
     my ($self) = @_;
     
-    # 1. Truncamos el offset flotante a entero para buscar en el arreglo
+    my $total_candles = $self->{market_data}->size();
     my $start = int($self->{offset});
     
-    # 2. Pedimos una vela extra (+1) en el límite derecho. 
-    # Esto evita que aparezca un "hueco" negro en el borde mientras arrastras 
-    # suavemente antes de que se cargue la siguiente vela.
-    my $end = $start + $self->{visible_bars} + 1;
+    # Protecciones estrictas para no pedir índices inexistentes en el arreglo
+    $start = 0 if $start < 0;
+    $start = $total_candles - 1 if $start >= $total_candles;
     
-    # Protección de límite superior
-    my $total_candles = $self->{market_data}->size();
+    my $end = $start + $self->{visible_bars} + 1;
     $end = $total_candles - 1 if $end >= $total_candles;
     
     return ($start, $end);
@@ -73,65 +77,51 @@ sub request_render {
 
 sub render {
     my ($self) = @_;
-    $self->{render_flag} = 0; # Reiniciamos el flag
+    $self->{render_flag} = 0;
 
-    # 1. Calcular ventana visible [cite: 503]
     my ($start, $end) = $self->compute_window();
     my $data_slice = $self->{market_data}->get_slice($start, $end);
     my $atr_slice  = $self->{indicators}->slice_array('ATR', $start, $end);
 
-    # 2. Configurar Escalas
     my $width  = $self->{price_canvas}->width;
     my $height = $self->{price_canvas}->height;
     
     my ($min_y, $max_y);
-    
     if ($self->{auto_scale_y}) {
-        # MODO AUTOMÁTICO: Calcula los límites basados en las velas en pantalla
         ($min_y, $max_y) = $self->{price_panel}->get_y_range($data_slice);
     } else {
-        # MODO MANUAL: Usa los límites congelados
         $min_y = $self->{manual_min_y};
         $max_y = $self->{manual_max_y};
     }
-    # Extraemos solo el residuo decimal (ej. de 100.4 extrae 0.4)
-    my $fractional_offset = $self->{offset} - int($self->{offset});
+    
+    # LA MAGIA DE LOS MÁRGENES: La diferencia entre lo que pide el programa
+    # y lo que realmente extrajo, genera el espacio en blanco automáticamente.
+    my $scale_offset = $self->{offset} - $start;
 
-    # Instanciamos la escala
     my $scale = Market::Panels::Scales->new(
         width        => $width,
         height       => $height,
         min_val      => $min_y,
         max_val      => $max_y,
         visible_bars => $self->{visible_bars},
-        offset       => $fractional_offset, # <-- Aquí ocurre la transición fluida
+        offset       => $scale_offset, 
     );
 
-    # Asignamos la escala y llamamos al render de cada panel [cite: 504]
     $self->{price_panel}->set_scale($scale);
     $self->{price_panel}->render($data_slice);
     
-    
-    # (Aquí harías un proceso similar de instanciar y asignar una escala propia para el atr_panel)
-    # ==========================================
-    # Renderizado del Panel Secundario (ATR)
-    # ==========================================
+    # Panel Secundario (ATR)
     my $atr_width  = $self->{atr_canvas}->width;
     my $atr_height = $self->{atr_canvas}->height;
-    
-    # Obtenemos los límites dinámicos del indicador
     my ($atr_min, $atr_max) = $self->{atr_panel}->get_y_range($atr_slice);
 
-    # Creamos una escala independiente para el panel inferior.
-    # Nota importante: Compartimos el mismo fractional_offset del panel de precios
-    # para que la coordenada X esté sincronizada pixel a pixel.
     my $atr_scale = Market::Panels::Scales->new(
         width        => $atr_width,
         height       => $atr_height,
         min_val      => $atr_min,
         max_val      => $atr_max,
         visible_bars => $self->{visible_bars},
-        offset       => $fractional_offset, 
+        offset       => $scale_offset, 
     );
 
     $self->{atr_panel}->set_scale($atr_scale);
@@ -306,13 +296,9 @@ sub _on_drag_motion {
     my $fractional_shift = $dx / $candle_width;
     my $new_offset = $self->{drag_start_offset} + $fractional_shift;
     
-    # Límites de seguridad para no hacer scroll más allá de los datos
-    $new_offset = 0 if $new_offset < 0;
-    my $max_offset = $self->{market_data}->size() - $self->{visible_bars};
-    $new_offset = $max_offset if $new_offset > $max_offset && $max_offset > 0;
-    
     if ($new_offset != $self->{offset}) {
         $self->{offset} = $new_offset;
+        $self->_clamp_offset(); # <-- Usa la nueva función
         $self->request_render();
     }
 }
@@ -344,31 +330,28 @@ sub _vertical_drag {
 
 sub reset_view {
     my ($self) = @_;
-    # Volver al estado original (Modo automático, sin offset y zoom por defecto)
     $self->{auto_scale_y} = 1;
-    $self->{offset}       = 0;
-    $self->{visible_bars} = 100; # Velas por defecto al abrir
+    $self->{visible_bars} = 100;
+    
+    my $total_candles = $self->{market_data}->size();
+    my $margin = $self->{visible_bars} * 0.15;
+    
+    # Volver al presente y dejar margen derecho
+    $self->{offset} = $total_candles - $self->{visible_bars} + $margin;
+    $self->_clamp_offset();
+    
     $self->request_render();
 }
 
 sub set_timeframe {
     my ($self, $tf) = @_;
 
-    # 1. Avisamos a la capa de datos que cambie su puntero interno
     $self->{market_data}->set_timeframe($tf);
-
-    # 2. Reseteamos la memoria de todos los indicadores registrados
     $self->{indicators}->reset_all();
-    
-    # 3. Recalculamos los indicadores para el nuevo histórico completo
     $self->{indicators}->recalculate_all($self->{market_data});
 
-    # 4. Reiniciamos la vista y el zoom a los valores por defecto
+    # reset_view() ahora calcula y se posiciona solo al final de la data
     $self->reset_view();
-    $self->{offset} = 0;
-    
-    # 5. Forzamos un renderizado para actualizar la pantalla
-    $self->request_render();
 }
 
 sub _horizontal_zoom {
@@ -415,10 +398,7 @@ sub _horizontal_zoom {
     my $bar_diff = $old_visible - $self->{visible_bars};
     $self->{offset} += ($bar_diff * $ratio);
 
-    $self->{offset} = 0 if $self->{offset} < 0;
-    my $max_offset = $max_bars - $self->{visible_bars};
-    $self->{offset} = $max_offset if $self->{offset} > $max_offset && $max_offset > 0;
-
+    $self->_clamp_offset(); # <-- Usa la nueva función
     $self->request_render();
 }
 
@@ -505,13 +485,9 @@ sub _pan_horizontal {
     
     my $new_offset = $self->{offset} + ($direction * $step);
     
-    # Protecciones para no salir del arreglo de datos
-    $new_offset = 0 if $new_offset < 0;
-    my $max_offset = $self->{market_data}->size() - $self->{visible_bars};
-    $new_offset = $max_offset if $new_offset > $max_offset && $max_offset > 0;
-    
     if ($new_offset != $self->{offset}) {
         $self->{offset} = $new_offset;
+        $self->_clamp_offset(); # <-- Usa la nueva función
         $self->request_render();
     }
 }
@@ -533,6 +509,26 @@ sub _pan_vertical {
     $self->request_render();
 }
 
+sub _clamp_offset {
+    my ($self) = @_;
+    my $total_candles = $self->{market_data}->size();
+    
+    # Calculamos un margen equivalente al 15% de las velas en pantalla
+    my $margin = $self->{visible_bars} * 0.15; 
+    
+    # El mínimo ya no es 0, ahora es negativo para dejar espacio a la izquierda
+    my $min_offset = -$margin;
+    
+    # El máximo se excede intencionalmente para dejar espacio a la derecha
+    my $max_offset = $total_candles - $self->{visible_bars} + $margin;
+    
+    # Protección: Si la pantalla tiene más zoom que datos existentes, no cruzamos los límites
+    my $lower_bound = $min_offset < $max_offset ? $min_offset : $max_offset;
+    my $upper_bound = $min_offset > $max_offset ? $min_offset : $max_offset;
+    
+    $self->{offset} = $lower_bound if $self->{offset} < $lower_bound;
+    $self->{offset} = $upper_bound if $self->{offset} > $upper_bound;
+}
 
 
 1;
