@@ -513,19 +513,23 @@ sub _clamp_offset {
     my ($self) = @_;
     my $total_candles = $self->{market_data}->size();
     
-    # Calculamos un margen equivalente al 15% de las velas en pantalla
-    my $margin = $self->{visible_bars} * 0.15; 
+    # Límite Izquierdo: Mantenemos el margen del 15% para cuando llegas al inicio del pasado
+    my $margin_left = $self->{visible_bars} * 0.15; 
+    my $min_offset = -$margin_left;
     
-    # El mínimo ya no es 0, ahora es negativo para dejar espacio a la izquierda
-    my $min_offset = -$margin;
+    # NUEVO LÍMITE DERECHO: 
+    # Permitimos que la gráfica se desplace hasta que la vela número 0 de la pantalla
+    # sea la penúltima vela de la data. Esto deja solo 2 velas pegadas a la izquierda.
+    my $max_offset = $total_candles - 2;
     
-    # El máximo se excede intencionalmente para dejar espacio a la derecha
-    my $max_offset = $total_candles - $self->{visible_bars} + $margin;
+    # Protección de seguridad por si el archivo carga con menos de 2 velas
+    $max_offset = 0 if $max_offset < 0;
     
-    # Protección: Si la pantalla tiene más zoom que datos existentes, no cruzamos los límites
+    # Evaluar qué valor es el techo y cuál es el piso
     my $lower_bound = $min_offset < $max_offset ? $min_offset : $max_offset;
     my $upper_bound = $min_offset > $max_offset ? $min_offset : $max_offset;
     
+    # Aplicar el bloqueo (Clamp) al desplazamiento actual
     $self->{offset} = $lower_bound if $self->{offset} < $lower_bound;
     $self->{offset} = $upper_bound if $self->{offset} > $upper_bound;
 }
