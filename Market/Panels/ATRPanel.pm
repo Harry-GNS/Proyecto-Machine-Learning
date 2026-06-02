@@ -20,9 +20,23 @@ sub new {
 sub _init_crosshair_objects {
     my ($self) = @_;
     my $c = $self->{canvas};
-    $self->{crosshair}->{vline} = $c->createLine(0, 0, 0, 0, -fill => 'gray', -dash => '.', -state => 'hidden');
-    $self->{crosshair}->{hline} = $c->createLine(0, 0, 0, 0, -fill => 'gray', -dash => '.', -state => 'hidden');
-    $self->{crosshair}->{text}  = $c->createText(0, 0, -text => '', -fill => 'white', -state => 'hidden');
+    
+    # Líneas guía
+    $self->{crosshair}->{vline} = $c->createLine(0, 0, 0, 0, -fill => '#9598a1', -dash => '.', -state => 'hidden');
+    $self->{crosshair}->{hline} = $c->createLine(0, 0, 0, 0, -fill => '#9598a1', -dash => '.', -state => 'hidden');
+    
+    # Etiqueta Y (Valor en el eje derecho) - Fondo y Texto
+    $self->{crosshair}->{y_bg}   = $c->createRectangle(0, 0, 0, 0, -fill => '#2962FF', -outline => '#2962FF', -state => 'hidden');
+    $self->{crosshair}->{y_text} = $c->createText(0, 0, -text => '', -fill => 'white', -anchor => 'e', -state => 'hidden');
+
+    # NUEVO: Texto en la esquina superior izquierda para el valor exacto de la vela
+    $self->{crosshair}->{info_text} = $c->createText(
+        10, 10, 
+        -text => '', 
+        -fill => '#2962FF', 
+        -anchor => 'nw',
+        -font => ['Helvetica', 10, 'bold']
+    );
 }
 
 sub get_y_range {
@@ -54,6 +68,10 @@ sub set_scale {
 
 sub render {
     my ($self, $data_slice) = @_;
+    
+    # NUEVO: Guardamos los datos para leerlos luego con el cursor
+    $self->{current_slice} = $data_slice;
+    
     my $c = $self->{canvas};
     my $s = $self->{scale};
     
@@ -63,30 +81,24 @@ sub render {
     $c->delete('atr_line'); 
 
     my @coords;
-    
     for my $i (0 .. $#{$data_slice}) {
         my $val = $data_slice->[$i];
-        
-        # Saltamos el dibujo si estamos en el inicio histórico donde el ATR aún no se calcula
         next unless defined $val; 
         
         my $x = $s->index_to_center_x($i);
         my $y = $s->value_to_y($val);
-        
         push @coords, $x, $y;
     }
     
-    # Dibujar la línea continua si tenemos al menos 2 puntos (4 coordenadas: x1, y1, x2, y2)
     if (@coords >= 4) {
         $c->createLine(
             @coords,
-            -fill  => '#2962FF', # Color Azul clásico de indicadores en TradingView
+            -fill  => '#2962FF',
             -width => 2,
             -tags  => 'atr_line'
         );
     }
     
-    # Dibujar escala de valores del ATR a la derecha
     $s->_draw_y_scale($c);
 }
 
@@ -95,11 +107,12 @@ sub draw_crosshair {
     my $c = $self->{canvas};
     my $s = $self->{scale};
     
-    # 1. Si no hay X (el ratón salió del programa), ocultamos todo
+    # 1. Si el ratón sale, ocultar todo
     if (!defined $x || !$s) {
-        $c->itemconfigure($self->{crosshair}->{vline}, -state => 'hidden');
-        $c->itemconfigure($self->{crosshair}->{hline}, -state => 'hidden');
-        $c->itemconfigure($self->{crosshair}->{text},  -state => 'hidden');
+        my @hide_keys = qw(vline hline y_bg y_text);
+        foreach my $key (@hide_keys) {
+            $c->itemconfigure($self->{crosshair}->{$key}, -state => 'hidden') if exists $self->{crosshair}->{$key};
+        }
         return;
     }
 
@@ -107,13 +120,25 @@ sub draw_crosshair {
     my $height = $s->{height};
 
     # ==========================================
-    # EJE X: Siempre se dibuja (Sincronizado)
+    # EJE X (Sincronizado con PricePanel)
     # ==========================================
     $c->coords($self->{crosshair}->{vline}, $x, 0, $x, $height);
     $c->itemconfigure($self->{crosshair}->{vline}, -state => 'normal');
+    
+    # Extraer el valor exacto del ATR para la vela actual (Esquina superior izquierda)
+    if ($self->{current_slice}) {
+        my $candle_width = $width / $s->{visible_bars};
+        my $local_index = int(($x / $candle_width) + $s->{offset});
+        
+        if ($local_index >= 0 && $local_index < @{$self->{current_slice}}) {
+            my $val = $self->{current_slice}->[$local_index];
+            my $str = defined $val ? sprintf("ATR: %.4f", $val) : "ATR: N/A";
+            $c->itemconfigure($self->{crosshair}->{info_text}, -text => $str);
+        }
+    }
 
     # ==========================================
-    # EJE Y: Solo se dibuja si el ratón está aquí
+    # EJE Y (Valor en el lado derecho)
     # ==========================================
     if (defined $y) {
         $c->coords($self->{crosshair}->{hline}, 0, $y, $width, $y);
@@ -122,22 +147,33 @@ sub draw_crosshair {
         my $val = $s->y_to_value($y);
         my $display_val = sprintf("%.4f", $val);
         
-        $c->coords($self->{crosshair}->{text}, $width - 5, $y - 10);
-        $c->itemconfigure($self->{crosshair}->{text}, -text => $display_val, -state => 'normal');
+        # Etiqueta posicionada en el borde derecho, alineada exactamente al puntero ($y)
+        $c->coords($self->{crosshair}->{y_text}, $width - 5, $y);
+        $c->itemconfigure($self->{crosshair}->{y_text}, -text => $display_val, -state => 'normal');
+        
+        # Crear la caja de fondo azul dinámica
+        my @y_bbox = $c->bbox($self->{crosshair}->{y_text});
+        if (@y_bbox) {
+            $c->coords($self->{crosshair}->{y_bg}, $y_bbox[0]-4, $y_bbox[1]-2, $y_bbox[2]+4, $y_bbox[3]+2);
+            $c->itemconfigure($self->{crosshair}->{y_bg}, -state => 'normal');
+        }
     } else {
-        # Si el ratón está en el panel de arriba, ocultamos la línea horizontal del ATR
+        # Ocultar etiquetas horizontales si el puntero está en el panel de arriba
         $c->itemconfigure($self->{crosshair}->{hline}, -state => 'hidden');
-        $c->itemconfigure($self->{crosshair}->{text},  -state => 'hidden');
+        $c->itemconfigure($self->{crosshair}->{y_bg},  -state => 'hidden');
+        $c->itemconfigure($self->{crosshair}->{y_text}, -state => 'hidden');
     }
 
     # ==========================================
-    # ORGANIZACIÓN DE CAPAS FRONTALES
+    # ORDEN DE CAPAS FRONTALES
     # ==========================================
     $c->raise($self->{crosshair}->{vline});
+    $c->raise($self->{crosshair}->{info_text});
     
     if (defined $y) {
         $c->raise($self->{crosshair}->{hline});
-        $c->raise($self->{crosshair}->{text});
+        $c->raise($self->{crosshair}->{y_bg});
+        $c->raise($self->{crosshair}->{y_text});
     }
 }
 
