@@ -155,7 +155,7 @@ sub bind_events {
     });
 
     # =========================================================
-    # 1. Zoom Horizontal Normal (Anclado a la vela más reciente)
+    # 1. Zoom Horizontal Normal (Sin teclas, anclado a la derecha)
     # =========================================================
     $self->{price_canvas}->Tk::bind('<Button-4>', sub { 
         $self->_horizontal_zoom(1, 'right'); 
@@ -172,15 +172,13 @@ sub bind_events {
     # =========================================================
     $self->{price_canvas}->Tk::bind('<Control-Button-4>', sub { 
         my ($c) = @_; 
-        my $x = $c->XEvent->x; 
-        $self->_horizontal_zoom(1, $x); 
+        $self->_horizontal_zoom(1, $c->XEvent->x); 
         Tk->break; 
     });
     
     $self->{price_canvas}->Tk::bind('<Control-Button-5>', sub { 
         my ($c) = @_; 
-        my $x = $c->XEvent->x; 
-        $self->_horizontal_zoom(-1, $x); 
+        $self->_horizontal_zoom(-1, $c->XEvent->x); 
         Tk->break; 
     });
 
@@ -189,22 +187,13 @@ sub bind_events {
     # =========================================================
     $self->{price_canvas}->Tk::bind('<Shift-Button-4>', sub { 
         my ($c) = @_; 
-        my $y = $c->XEvent->y; 
-        $self->_vertical_zoom(1, $y); 
+        $self->_vertical_zoom(1, $c->XEvent->y); 
         Tk->break; 
     });
     
     $self->{price_canvas}->Tk::bind('<Shift-Button-5>', sub { 
         my ($c) = @_; 
-        my $y = $c->XEvent->y; 
-        $self->_vertical_zoom(-1, $y); 
-        Tk->break; 
-    });
-    
-    $self->{price_canvas}->Tk::bind('<Control-Button-5>', sub { 
-        my ($c) = @_; 
-        my $y = $c->XEvent->y; # Extraemos la coordenada Y del ratón
-        $self->_vertical_zoom(-1, $y); 
+        $self->_vertical_zoom(-1, $c->XEvent->y); 
         Tk->break; 
     });
 
