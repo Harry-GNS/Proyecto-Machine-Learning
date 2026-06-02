@@ -240,13 +240,22 @@ sub draw_crosshair {
     # EJE Y: Solo se dibuja si el ratón está aquí
     # ==========================================
     if (defined $y) {
-        $c->coords($self->{crosshair}->{hline}, 0, $y, $width, $y);
+        # 1. Obtener el valor crudo (exacto) de la posición del ratón
+        my $raw_val = $s->y_to_value($y);
+        
+        # 2. Redondear ese valor a la escala de 0.25
+        my $val = int($raw_val / 0.25 + 0.5) * 0.25;
+        
+        # 3. Efecto Imán (Snap): Recalcular la coordenada 'Y' en base al valor redondeado
+        my $snapped_y = $s->value_to_y($val);
+
+        # Usamos $snapped_y en lugar del $y del ratón para dibujar
+        $c->coords($self->{crosshair}->{hline}, 0, $snapped_y, $width, $snapped_y);
         $c->itemconfigure($self->{crosshair}->{hline}, -state => 'normal');
         
-        my $val = $s->y_to_value($y);
         my $display_val = sprintf("%.4f", $val);
         
-        $c->coords($self->{crosshair}->{y_text}, $width - 5, $y);
+        $c->coords($self->{crosshair}->{y_text}, $width - 5, $snapped_y);
         $c->itemconfigure($self->{crosshair}->{y_text}, -text => $display_val, -state => 'normal');
         
         my @y_bbox = $c->bbox($self->{crosshair}->{y_text});

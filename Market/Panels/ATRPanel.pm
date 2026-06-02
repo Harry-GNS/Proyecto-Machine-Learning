@@ -138,20 +138,24 @@ sub draw_crosshair {
     }
 
     # ==========================================
-    # EJE Y (Valor en el lado derecho)
+    # EJE Y (Valor en el lado derecho con escala 0.25)
     # ==========================================
     if (defined $y) {
-        $c->coords($self->{crosshair}->{hline}, 0, $y, $width, $y);
+        # 1. Obtener valor y redondearlo a la escala de 0.25
+        my $raw_val = $s->y_to_value($y);
+        my $val = int($raw_val / 0.25 + 0.5) * 0.25;
+        
+        # 2. Efecto Imán (Snap): Recalcular la coordenada 'Y' 
+        my $snapped_y = $s->value_to_y($val);
+
+        $c->coords($self->{crosshair}->{hline}, 0, $snapped_y, $width, $snapped_y);
         $c->itemconfigure($self->{crosshair}->{hline}, -state => 'normal');
         
-        my $val = $s->y_to_value($y);
         my $display_val = sprintf("%.4f", $val);
         
-        # Etiqueta posicionada en el borde derecho, alineada exactamente al puntero ($y)
-        $c->coords($self->{crosshair}->{y_text}, $width - 5, $y);
+        $c->coords($self->{crosshair}->{y_text}, $width - 5, $snapped_y);
         $c->itemconfigure($self->{crosshair}->{y_text}, -text => $display_val, -state => 'normal');
         
-        # Crear la caja de fondo azul dinámica
         my @y_bbox = $c->bbox($self->{crosshair}->{y_text});
         if (@y_bbox) {
             $c->coords($self->{crosshair}->{y_bg}, $y_bbox[0]-4, $y_bbox[1]-2, $y_bbox[2]+4, $y_bbox[3]+2);

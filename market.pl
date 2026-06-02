@@ -61,7 +61,7 @@ $toolbar->Button(
     -textvariable => \$modo_texto, 
     -command => sub { 
         my $es_auto = $engine->toggle_auto_scale();
-        $modo_texto = $es_auto ? "Modo: Automático" : "Modo: Manual";
+        $modo_texto = $es_auto ? "Modo: Automatico" : "Modo: Manual";
     }
 )->pack(-side => 'left', -padx => 20, -pady => 5);
 
