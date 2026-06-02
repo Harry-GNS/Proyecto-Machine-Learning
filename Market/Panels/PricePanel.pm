@@ -21,11 +21,32 @@ sub _init_crosshair_objects {
     my ($self) = @_;
     my $c = $self->{canvas};
     
-    # Objetos gráficos del crosshair ocultos por defecto
-    $self->{crosshair}->{vline} = $c->createLine(0, 0, 0, 0, -fill => 'gray', -dash => '.', -state => 'hidden');
-    $self->{crosshair}->{hline} = $c->createLine(0, 0, 0, 0, -fill => 'gray', -dash => '.', -state => 'hidden');
-    $self->{crosshair}->{text}  = $c->createText(0, 0, -text => '', -fill => 'white', -state => 'hidden');
+    # Líneas guía
+    $self->{crosshair}->{vline} = $c->createLine(0, 0, 0, 0, -fill => '#9598a1', -dash => '.', -state => 'hidden');
+    $self->{crosshair}->{hline} = $c->createLine(0, 0, 0, 0, -fill => '#9598a1', -dash => '.', -state => 'hidden');
+    
+    # Eje Y (Precio) - Fondo y Texto
+    # CORRECCIÓN: Usamos el mismo azul oscuro (#2962FF) en lugar de 'none'
+    $self->{crosshair}->{y_bg}   = $c->createRectangle(0, 0, 0, 0, -fill => '#2962FF', -outline => '#2962FF', -state => 'hidden');
+    $self->{crosshair}->{y_text} = $c->createText(0, 0, -text => '', -fill => 'white', -anchor => 'e', -state => 'hidden');
+    
+    # Eje X (Tiempo) - Fondo y Texto
+    # CORRECCIÓN: Usamos el mismo azul oscuro (#2962FF) en lugar de 'none'
+    $self->{crosshair}->{x_bg}   = $c->createRectangle(0, 0, 0, 0, -fill => '#2962FF', -outline => '#2962FF', -state => 'hidden');
+    $self->{crosshair}->{x_text} = $c->createText(0, 0, -text => '', -fill => 'white', -anchor => 's', -state => 'hidden');
+
+    # NUEVO: Texto OHLC (Superior Izquierda)
+    $self->{crosshair}->{ohlc_text} = $c->createText(
+        10, 10, 
+        -text => '', 
+        -fill => '#d1d4dc', # Gris claro
+        -anchor => 'nw',    # Noroeste
+        -font => ['Helvetica', 10, 'bold']
+    );
 }
+
+
+
 
 sub get_y_range {
     my ($self, $data_slice) = @_;
@@ -50,6 +71,10 @@ sub set_scale {
 
 sub render {
     my ($self, $data_slice) = @_;
+    
+    # NUEVO: Guardamos el fragmento actual para que el crosshair pueda leer las fechas
+    $self->{current_slice} = $data_slice; 
+    
     my $c = $self->{canvas};
     my $s = $self->{scale};
     
@@ -57,11 +82,13 @@ sub render {
 
     # 1. Limpiar TODO el canvas antes de repintar
     $c->delete('candle'); 
+    $c->delete('volume'); # <-- NUEVO: Limpiamos el volumen viejo
     
-    # 2. DIBUJAR EL EJE Y FONDO PRIMERO (Para que quede detrás de las velas)
+    # 2. Dibujar el eje, el fondo y el volumen PRIMERO (Capas inferiores)
     $self->draw_time_axis($data_slice);
+    $self->draw_volume($data_slice); # <-- NUEVO: Invocamos el dibujo del volumen
 
-    # 3. Dibujar las velas
+    # 3. Dibujar las velas (Capa superior)
     for my $i (0 .. $#{$data_slice}) {
         my $candle = $data_slice->[$i];
         
@@ -107,28 +134,93 @@ sub draw_crosshair {
     my $c = $self->{canvas};
     my $s = $self->{scale};
     
-    if (!defined $x || !defined $y) {
-        $c->itemconfigure($self->{crosshair}->{vline}, -state => 'hidden');
-        $c->itemconfigure($self->{crosshair}->{hline}, -state => 'hidden');
-        $c->itemconfigure($self->{crosshair}->{text},  -state => 'hidden');
+# Si el ratón sale de la pantalla o está oculto por un zoom
+    if (!defined $x || !defined $y || !$s || !$self->{current_slice}) {
+        
+        # 1. Mostrar el OHLC de la última vela visible por defecto
+        if ($self->{current_slice} && @{$self->{current_slice}}) {
+            my $last = $self->{current_slice}->[-1];
+            my $ohlc_str = sprintf("O: %.4f   H: %.4f   L: %.4f   C: %.4f", 
+                                    $last->{open}, $last->{high}, $last->{low}, $last->{close});
+            $c->itemconfigure($self->{crosshair}->{ohlc_text}, -text => $ohlc_str);
+            $c->raise($self->{crosshair}->{ohlc_text}); # Mantener por encima de todo
+        }
+
+        # 2. Ocultar el resto del crosshair
+        my @hide_keys = qw(vline hline y_bg y_text x_bg x_text);
+        foreach my $key (@hide_keys) {
+            $c->itemconfigure($self->{crosshair}->{$key}, -state => 'hidden') if exists $self->{crosshair}->{$key};
+        }
         return;
     }
-
-    my $price = $s->y_to_value($y);
-    my $display_price = sprintf("%.4f", $price);
 
     my $width  = $s->{width};
     my $height = $s->{height};
 
+    # 1. Mover Líneas
     $c->coords($self->{crosshair}->{vline}, $x, 0, $x, $height);
     $c->coords($self->{crosshair}->{hline}, 0, $y, $width, $y);
-    
-    $c->coords($self->{crosshair}->{text}, $width - 5, $y - 10);
-    $c->itemconfigure($self->{crosshair}->{text}, -text => $display_price);
 
+    # NUEVO: Forzar el estado a normal para que se dibujen
     $c->itemconfigure($self->{crosshair}->{vline}, -state => 'normal');
     $c->itemconfigure($self->{crosshair}->{hline}, -state => 'normal');
-    $c->itemconfigure($self->{crosshair}->{text},  -state => 'normal');
+
+    # 2. Configurar Etiqueta Y (Precio)
+    my $val = $s->y_to_value($y);
+    my $display_val = sprintf("%.4f", $val);
+    
+    $c->coords($self->{crosshair}->{y_text}, $width - 5, $y);
+    $c->itemconfigure($self->{crosshair}->{y_text}, -text => $display_val, -state => 'normal');
+    
+    # 3. Configurar Etiqueta X (Tiempo)
+    # Calculamos el índice local de la vela bajo el cursor
+    my $candle_width = $width / $s->{visible_bars};
+    my $local_index = int(($x / $candle_width) + $s->{offset});
+    
+    my $ts = "";
+    my $slice = $self->{current_slice};
+    
+    if ($local_index >= 0 && $local_index < @$slice) {
+        my $hovered_candle = $slice->[$local_index];
+        $ts = $hovered_candle->{timestamp};
+        if ($ts =~ /(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})/) {
+            $ts = "$3/$2 $4"; 
+        }
+        
+        # NUEVO: Actualizar el OHLC con la vela que el ratón está tocando
+        my $ohlc_str = sprintf("O: %.4f   H: %.4f   L: %.4f   C: %.4f", 
+                                $hovered_candle->{open}, $hovered_candle->{high}, 
+                                $hovered_candle->{low}, $hovered_candle->{close});
+        $c->itemconfigure($self->{crosshair}->{ohlc_text}, -text => $ohlc_str);
+    }
+    
+    $c->coords($self->{crosshair}->{x_text}, $x, $height - 10);
+    $c->itemconfigure($self->{crosshair}->{x_text}, -text => $ts, -state => 'normal');
+
+    # 4. Ajustar los Fondos (Bounding Box)
+    # Extraemos las coordenadas de la caja de los textos y le damos 4 píxeles de "padding"
+    my @y_bbox = $c->bbox($self->{crosshair}->{y_text});
+    if (@y_bbox) {
+        $c->coords($self->{crosshair}->{y_bg}, $y_bbox[0]-4, $y_bbox[1]-2, $y_bbox[2]+4, $y_bbox[3]+2);
+        $c->itemconfigure($self->{crosshair}->{y_bg}, -state => 'normal');
+    }
+    
+    my @x_bbox = $c->bbox($self->{crosshair}->{x_text});
+    if (@x_bbox && $ts ne "") {
+        $c->coords($self->{crosshair}->{x_bg}, $x_bbox[0]-4, $x_bbox[1]-2, $x_bbox[2]+4, $x_bbox[3]+2);
+        $c->itemconfigure($self->{crosshair}->{x_bg}, -state => 'normal');
+    } else {
+        $c->itemconfigure($self->{crosshair}->{x_bg}, -state => 'hidden');
+    }
+
+    # 5. FORZAR CAPA SUPERIOR: Asegurarnos que el crosshair no quede tapado por las velas
+    $c->raise($self->{crosshair}->{vline});
+    $c->raise($self->{crosshair}->{hline});
+    $c->raise($self->{crosshair}->{y_bg});
+    $c->raise($self->{crosshair}->{y_text});
+    $c->raise($self->{crosshair}->{x_bg});
+    $c->raise($self->{crosshair}->{x_text});
+    $c->raise($self->{crosshair}->{ohlc_text}); # <-- NUEVO
 }
 
 sub draw_time_axis {
@@ -182,5 +274,52 @@ sub draw_time_axis {
     }
 }
 
+sub draw_volume {
+    my ($self, $data_slice) = @_;
+    my $c = $self->{canvas};
+    my $s = $self->{scale};
+    
+    return unless @$data_slice;
+
+    my $max_vol = 0;
+    foreach my $candle (@$data_slice) {
+        $max_vol = $candle->{volume} if $candle->{volume} > $max_vol;
+    }
+    
+    return if $max_vol == 0; 
+
+    my $height = $s->{height};
+    
+    # 1. MARGEN INFERIOR: Reservamos 25 píxeles en la base del canvas para las fechas
+    my $bottom_padding = 25;
+    
+    # Calculamos la altura máxima del volumen respetando el margen
+    my $max_bar_height = ($height - $bottom_padding) * 0.20;
+
+    for my $i (0 .. $#{$data_slice}) {
+        my $candle = $data_slice->[$i];
+        my $vol = $candle->{volume};
+        
+        next unless $vol > 0;
+
+        my $bar_height = ($vol / $max_vol) * $max_bar_height;
+
+        my $x_left   = $s->index_to_x($i);
+        my $x_right  = $s->index_to_x($i + 1) - 1; 
+        
+        # 2. NUEVA BASE: Las barras aterrizan sobre el margen, no sobre el fondo total
+        my $y_bottom = $height - $bottom_padding; 
+        my $y_top    = $y_bottom - $bar_height;
+
+        my $color = ($candle->{close} >= $candle->{open}) ? '#1d5c4d' : '#7a2524';
+
+        $c->createRectangle(
+            $x_left, $y_top, $x_right, $y_bottom, 
+            -fill    => $color, 
+            -outline => $color, 
+            -tags    => 'volume'
+        );
+    }
+}
 
 1;

@@ -156,28 +156,56 @@ sub bind_events {
     });
 
 # =========================================================
-    # Zoom Horizontal
+    # 1. Zoom Horizontal Normal (Anclado a la vela más reciente)
     # =========================================================
     $self->{price_canvas}->Tk::bind('<Button-4>', sub { 
-        $self->_horizontal_zoom(1); 
-        Tk->break; # Sintaxis absoluta para matar el evento en Perl
+        $self->_horizontal_zoom(1, 'right'); 
+        Tk->break; 
     });
     
     $self->{price_canvas}->Tk::bind('<Button-5>', sub { 
-        $self->_horizontal_zoom(-1); 
+        $self->_horizontal_zoom(-1, 'right'); 
         Tk->break; 
     });
 
     # =========================================================
-    # Zoom Vertical 
+    # 2. Zoom Horizontal Fijo al Puntero (Ctrl + Scroll)
     # =========================================================
     $self->{price_canvas}->Tk::bind('<Control-Button-4>', sub { 
-        $self->_vertical_zoom(1); 
+        my ($c) = @_; 
+        my $x = $c->XEvent->x; 
+        $self->_horizontal_zoom(1, $x); 
         Tk->break; 
     });
     
     $self->{price_canvas}->Tk::bind('<Control-Button-5>', sub { 
-        $self->_vertical_zoom(-1); 
+        my ($c) = @_; 
+        my $x = $c->XEvent->x; 
+        $self->_horizontal_zoom(-1, $x); 
+        Tk->break; 
+    });
+
+    # =========================================================
+    # 3. Zoom Vertical de Precios (Shift + Scroll)
+    # =========================================================
+    $self->{price_canvas}->Tk::bind('<Shift-Button-4>', sub { 
+        my ($c) = @_; 
+        my $y = $c->XEvent->y; 
+        $self->_vertical_zoom(1, $y); 
+        Tk->break; 
+    });
+    
+    $self->{price_canvas}->Tk::bind('<Shift-Button-5>', sub { 
+        my ($c) = @_; 
+        my $y = $c->XEvent->y; 
+        $self->_vertical_zoom(-1, $y); 
+        Tk->break; 
+    });
+    
+    $self->{price_canvas}->Tk::bind('<Control-Button-5>', sub { 
+        my ($c) = @_; 
+        my $y = $c->XEvent->y; # Extraemos la coordenada Y del ratón
+        $self->_vertical_zoom(-1, $y); 
         Tk->break; 
     });
 
@@ -333,44 +361,65 @@ sub set_timeframe {
 }
 
 sub _horizontal_zoom {
-    my ($self, $delta) = @_;
+    my ($self, $delta, $x_or_right) = @_;
     
-    # 1. BLOQUEO DE VIEWPORT: Forzar el canvas a no moverse de su origen
+    # BLOQUEO DE VIEWPORT
     $self->{price_canvas}->yviewMoveto(0);
     $self->{price_canvas}->xviewMoveto(0);
     $self->{atr_canvas}->yviewMoveto(0);
     $self->{atr_canvas}->xviewMoveto(0);
     
-    # Ocultar el crosshair para evitar que se deforme
     $self->{price_panel}->draw_crosshair(undef, undef);
     $self->{atr_panel}->draw_crosshair(undef, undef);
 
-    # Modificar la cantidad de velas visibles
-    my $step = 10; 
-    if ($delta > 0) {
-        $self->{visible_bars} -= $step; # Acercar (Rueda arriba = menos velas)
+    my $width = $self->{price_canvas}->width;
+    return if $width == 0;
+
+    # EVALUAR EL RATIO: Si es 'right', forzamos el 1.0 (Borde derecho)
+    # Si es un número, calculamos la proporción de la pantalla
+    my $ratio;
+    if ($x_or_right eq 'right') {
+        $ratio = 1.0;
     } else {
-        $self->{visible_bars} += $step; # Alejar (Rueda abajo = más velas)
+        $ratio = $x_or_right / $width;
+        $ratio = 0 if $ratio < 0;
+        $ratio = 1 if $ratio > 1;
     }
 
-    # Proteger contra límites lógicos
+    my $old_visible = $self->{visible_bars};
+    my $step = 10; 
+
+    # Aplicar el zoom a la cantidad de velas
+    if ($delta > 0) {
+        $self->{visible_bars} -= $step; # Acercar
+    } else {
+        $self->{visible_bars} += $step; # Alejar
+    }
+
     $self->{visible_bars} = 10 if $self->{visible_bars} < 10;
     my $max_bars = $self->{market_data}->size();
     $self->{visible_bars} = $max_bars if $self->{visible_bars} > $max_bars && $max_bars > 0;
+
+    # Compensar el offset según el ratio calculado
+    my $bar_diff = $old_visible - $self->{visible_bars};
+    $self->{offset} += ($bar_diff * $ratio);
+
+    $self->{offset} = 0 if $self->{offset} < 0;
+    my $max_offset = $max_bars - $self->{visible_bars};
+    $self->{offset} = $max_offset if $self->{offset} > $max_offset && $max_offset > 0;
 
     $self->request_render();
 }
 
 sub _vertical_zoom {
-    my ($self, $delta) = @_;
+    my ($self, $delta, $y) = @_;
     
-    # 1. BLOQUEO DE VIEWPORT: Prevenir el desajuste de la cuadrícula
+    # 1. BLOQUEO DE VIEWPORT
     $self->{price_canvas}->yviewMoveto(0);
     $self->{price_canvas}->xviewMoveto(0);
     $self->{atr_canvas}->yviewMoveto(0);
     $self->{atr_canvas}->xviewMoveto(0);
     
-    # Ocultar el crosshair
     $self->{price_panel}->draw_crosshair(undef, undef);
     $self->{atr_panel}->draw_crosshair(undef, undef);
     
@@ -381,25 +430,37 @@ sub _vertical_zoom {
         $self->{auto_scale_y} = 0; 
     }
 
-    my $zoom_factor = 0.05;
     my $current_range = $self->{manual_max_y} - $self->{manual_min_y};
-    
     return if $current_range <= 0.0001; 
+
+    # --- NUEVA MATEMÁTICA DE ZOOM ANCLADO ---
     
+    my $height = $self->{price_canvas}->height;
+    return if $height == 0;
+
+    # Calculamos la proporción del ratón en la pantalla (0.0 es el techo, 1.0 es el piso)
+    my $ratio = $y / $height;
+    
+    # Protegemos los límites por si el cursor está justo en el borde exterior
+    $ratio = 0 if $ratio < 0;
+    $ratio = 1 if $ratio > 1;
+
+    my $zoom_factor = 0.05;
     my $zoom_amount = $current_range * $zoom_factor;
 
     if ($delta > 0) {
-        # Acercar (Control + Rueda Arriba)
-        $self->{manual_max_y} -= $zoom_amount;
-        $self->{manual_min_y} += $zoom_amount;
+        # Acercar (Estirar) -> Reducimos el rango total
+        # Al techo (max_y) le quitamos la parte proporcional de arriba
+        $self->{manual_max_y} -= $zoom_amount * $ratio;
+        # Al piso (min_y) le sumamos el resto proporcional de abajo
+        $self->{manual_min_y} += $zoom_amount * (1 - $ratio);
     } else {
-        # Alejar (Control + Rueda Abajo)
-        $self->{manual_max_y} += $zoom_amount;
-        $self->{manual_min_y} -= $zoom_amount;
+        # Alejar (Aplastar) -> Aumentamos el rango total
+        $self->{manual_max_y} += $zoom_amount * $ratio;
+        $self->{manual_min_y} -= $zoom_amount * (1 - $ratio);
     }
 
     $self->request_render();
 }
-
 
 1;
