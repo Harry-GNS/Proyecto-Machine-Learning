@@ -177,19 +177,16 @@ sub draw_crosshair {
     my $c = $self->{canvas};
     my $s = $self->{scale};
     
-# Si el ratón sale de la pantalla o está oculto por un zoom
-    if (!defined $x || !defined $y || !$s || !$self->{current_slice}) {
-        
-        # 1. Mostrar el OHLC de la última vela visible por defecto
-        if ($self->{current_slice} && @{$self->{current_slice}}) {
+    # 1. Si NO hay X (el ratón salió del programa), ocultar todo
+    if (!defined $x || !$s || !$self->{current_slice}) {
+        if (exists $self->{crosshair}->{ohlc_text} && $self->{current_slice} && @{$self->{current_slice}}) {
             my $last = $self->{current_slice}->[-1];
             my $ohlc_str = sprintf("O: %.4f   H: %.4f   L: %.4f   C: %.4f", 
                                     $last->{open}, $last->{high}, $last->{low}, $last->{close});
             $c->itemconfigure($self->{crosshair}->{ohlc_text}, -text => $ohlc_str);
-            $c->raise($self->{crosshair}->{ohlc_text}); # Mantener por encima de todo
+            $c->raise($self->{crosshair}->{ohlc_text});
         }
 
-        # 2. Ocultar el resto del crosshair
         my @hide_keys = qw(vline hline y_bg y_text x_bg x_text);
         foreach my $key (@hide_keys) {
             $c->itemconfigure($self->{crosshair}->{$key}, -state => 'hidden') if exists $self->{crosshair}->{$key};
@@ -200,23 +197,12 @@ sub draw_crosshair {
     my $width  = $s->{width};
     my $height = $s->{height};
 
-    # 1. Mover Líneas
+    # ==========================================
+    # EJE X: Siempre se dibuja (Sincronizado)
+    # ==========================================
     $c->coords($self->{crosshair}->{vline}, $x, 0, $x, $height);
-    $c->coords($self->{crosshair}->{hline}, 0, $y, $width, $y);
-
-    # NUEVO: Forzar el estado a normal para que se dibujen
     $c->itemconfigure($self->{crosshair}->{vline}, -state => 'normal');
-    $c->itemconfigure($self->{crosshair}->{hline}, -state => 'normal');
 
-    # 2. Configurar Etiqueta Y (Precio)
-    my $val = $s->y_to_value($y);
-    my $display_val = sprintf("%.4f", $val);
-    
-    $c->coords($self->{crosshair}->{y_text}, $width - 5, $y);
-    $c->itemconfigure($self->{crosshair}->{y_text}, -text => $display_val, -state => 'normal');
-    
-    # 3. Configurar Etiqueta X (Tiempo)
-    # Calculamos el índice local de la vela bajo el cursor
     my $candle_width = $width / $s->{visible_bars};
     my $local_index = int(($x / $candle_width) + $s->{offset});
     
@@ -230,24 +216,18 @@ sub draw_crosshair {
             $ts = "$3/$2 $4"; 
         }
         
-        # NUEVO: Actualizar el OHLC con la vela que el ratón está tocando
-        my $ohlc_str = sprintf("O: %.4f   H: %.4f   L: %.4f   C: %.4f", 
-                                $hovered_candle->{open}, $hovered_candle->{high}, 
-                                $hovered_candle->{low}, $hovered_candle->{close});
-        $c->itemconfigure($self->{crosshair}->{ohlc_text}, -text => $ohlc_str);
+        # OHLC interactivo
+        if (exists $self->{crosshair}->{ohlc_text}) {
+            my $ohlc_str = sprintf("O: %.4f   H: %.4f   L: %.4f   C: %.4f", 
+                                    $hovered_candle->{open}, $hovered_candle->{high}, 
+                                    $hovered_candle->{low}, $hovered_candle->{close});
+            $c->itemconfigure($self->{crosshair}->{ohlc_text}, -text => $ohlc_str);
+        }
     }
     
     $c->coords($self->{crosshair}->{x_text}, $x, $height - 10);
     $c->itemconfigure($self->{crosshair}->{x_text}, -text => $ts, -state => 'normal');
 
-    # 4. Ajustar los Fondos (Bounding Box)
-    # Extraemos las coordenadas de la caja de los textos y le damos 4 píxeles de "padding"
-    my @y_bbox = $c->bbox($self->{crosshair}->{y_text});
-    if (@y_bbox) {
-        $c->coords($self->{crosshair}->{y_bg}, $y_bbox[0]-4, $y_bbox[1]-2, $y_bbox[2]+4, $y_bbox[3]+2);
-        $c->itemconfigure($self->{crosshair}->{y_bg}, -state => 'normal');
-    }
-    
     my @x_bbox = $c->bbox($self->{crosshair}->{x_text});
     if (@x_bbox && $ts ne "") {
         $c->coords($self->{crosshair}->{x_bg}, $x_bbox[0]-4, $x_bbox[1]-2, $x_bbox[2]+4, $x_bbox[3]+2);
@@ -256,14 +236,45 @@ sub draw_crosshair {
         $c->itemconfigure($self->{crosshair}->{x_bg}, -state => 'hidden');
     }
 
-    # 5. FORZAR CAPA SUPERIOR: Asegurarnos que el crosshair no quede tapado por las velas
+    # ==========================================
+    # EJE Y: Solo se dibuja si el ratón está aquí
+    # ==========================================
+    if (defined $y) {
+        $c->coords($self->{crosshair}->{hline}, 0, $y, $width, $y);
+        $c->itemconfigure($self->{crosshair}->{hline}, -state => 'normal');
+        
+        my $val = $s->y_to_value($y);
+        my $display_val = sprintf("%.4f", $val);
+        
+        $c->coords($self->{crosshair}->{y_text}, $width - 5, $y);
+        $c->itemconfigure($self->{crosshair}->{y_text}, -text => $display_val, -state => 'normal');
+        
+        my @y_bbox = $c->bbox($self->{crosshair}->{y_text});
+        if (@y_bbox) {
+            $c->coords($self->{crosshair}->{y_bg}, $y_bbox[0]-4, $y_bbox[1]-2, $y_bbox[2]+4, $y_bbox[3]+2);
+            $c->itemconfigure($self->{crosshair}->{y_bg}, -state => 'normal');
+        }
+    } else {
+        # Ocultamos la línea horizontal y la etiqueta de precio
+        $c->itemconfigure($self->{crosshair}->{hline}, -state => 'hidden');
+        $c->itemconfigure($self->{crosshair}->{y_bg},  -state => 'hidden');
+        $c->itemconfigure($self->{crosshair}->{y_text}, -state => 'hidden');
+    }
+
+    # ==========================================
+    # ORGANIZACIÓN DE CAPAS FRONTALES
+    # ==========================================
     $c->raise($self->{crosshair}->{vline});
-    $c->raise($self->{crosshair}->{hline});
-    $c->raise($self->{crosshair}->{y_bg});
-    $c->raise($self->{crosshair}->{y_text});
     $c->raise($self->{crosshair}->{x_bg});
     $c->raise($self->{crosshair}->{x_text});
-    $c->raise($self->{crosshair}->{ohlc_text}); # <-- NUEVO
+    
+    if (defined $y) {
+        $c->raise($self->{crosshair}->{hline});
+        $c->raise($self->{crosshair}->{y_bg});
+        $c->raise($self->{crosshair}->{y_text});
+    }
+    
+    $c->raise($self->{crosshair}->{ohlc_text}) if exists $self->{crosshair}->{ohlc_text};
 }
 
 sub draw_time_axis {

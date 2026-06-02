@@ -145,6 +145,15 @@ sub bind_events {
         $self->_on_mouse_move($ev->x, $ev->y, 'atr');
     });
 
+    # evitar que la línea se quede "congelada" cuando el ratón sale del canvas
+    $self->{price_canvas}->Tk::bind('<Leave>', sub {
+        $self->_on_mouse_move(undef, undef, 'price');
+    });
+
+    $self->{atr_canvas}->Tk::bind('<Leave>', sub {
+        $self->_on_mouse_move(undef, undef, 'atr');
+    });
+
     # =========================================================
     # 1. Zoom Horizontal Normal (Anclado a la vela más reciente)
     # =========================================================
@@ -259,17 +268,13 @@ sub _on_mouse_move {
     my ($self, $x, $y, $panel_type) = @_;
     
     if ($panel_type eq 'price') {
-        # Si estamos en precios, actualizamos completo
+        # El ratón está en los Precios: Cruz completa aquí, solo vertical en el ATR
         $self->{price_panel}->draw_crosshair($x, $y);
-        
-        # En el ATR, pasamos "undef" en Y para ocultar la línea horizontal,
-        # pero esto puede causar que la vertical desaparezca. Por ahora 
-        # mantenemos las cajas de cruz de forma independiente al tocar su canvas:
-        $self->{atr_panel}->draw_crosshair(undef, undef); 
+        $self->{atr_panel}->draw_crosshair($x, undef); 
     } else {
-        # Si estamos en el ATR
+        # El ratón está en el ATR: Cruz completa aquí, solo vertical en los Precios
         $self->{atr_panel}->draw_crosshair($x, $y);
-        $self->{price_panel}->draw_crosshair(undef, undef);
+        $self->{price_panel}->draw_crosshair($x, undef);
     }
 }
 

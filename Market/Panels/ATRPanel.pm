@@ -95,29 +95,50 @@ sub draw_crosshair {
     my $c = $self->{canvas};
     my $s = $self->{scale};
     
-    # Lógica idéntica a PricePanel para mostrar/ocultar el cursor
-    if (!defined $x || !defined $y) {
+    # 1. Si no hay X (el ratón salió del programa), ocultamos todo
+    if (!defined $x || !$s) {
         $c->itemconfigure($self->{crosshair}->{vline}, -state => 'hidden');
         $c->itemconfigure($self->{crosshair}->{hline}, -state => 'hidden');
         $c->itemconfigure($self->{crosshair}->{text},  -state => 'hidden');
         return;
     }
 
-    my $val = $s->y_to_value($y);
-    my $display_val = sprintf("%.4f", $val);
-
     my $width  = $s->{width};
     my $height = $s->{height};
 
+    # ==========================================
+    # EJE X: Siempre se dibuja (Sincronizado)
+    # ==========================================
     $c->coords($self->{crosshair}->{vline}, $x, 0, $x, $height);
-    $c->coords($self->{crosshair}->{hline}, 0, $y, $width, $y);
-    
-    $c->coords($self->{crosshair}->{text}, $width - 5, $y - 10);
-    $c->itemconfigure($self->{crosshair}->{text}, -text => $display_val);
-
     $c->itemconfigure($self->{crosshair}->{vline}, -state => 'normal');
-    $c->itemconfigure($self->{crosshair}->{hline}, -state => 'normal');
-    $c->itemconfigure($self->{crosshair}->{text},  -state => 'normal');
+
+    # ==========================================
+    # EJE Y: Solo se dibuja si el ratón está aquí
+    # ==========================================
+    if (defined $y) {
+        $c->coords($self->{crosshair}->{hline}, 0, $y, $width, $y);
+        $c->itemconfigure($self->{crosshair}->{hline}, -state => 'normal');
+        
+        my $val = $s->y_to_value($y);
+        my $display_val = sprintf("%.4f", $val);
+        
+        $c->coords($self->{crosshair}->{text}, $width - 5, $y - 10);
+        $c->itemconfigure($self->{crosshair}->{text}, -text => $display_val, -state => 'normal');
+    } else {
+        # Si el ratón está en el panel de arriba, ocultamos la línea horizontal del ATR
+        $c->itemconfigure($self->{crosshair}->{hline}, -state => 'hidden');
+        $c->itemconfigure($self->{crosshair}->{text},  -state => 'hidden');
+    }
+
+    # ==========================================
+    # ORGANIZACIÓN DE CAPAS FRONTALES
+    # ==========================================
+    $c->raise($self->{crosshair}->{vline});
+    
+    if (defined $y) {
+        $c->raise($self->{crosshair}->{hline});
+        $c->raise($self->{crosshair}->{text});
+    }
 }
 
 1;
