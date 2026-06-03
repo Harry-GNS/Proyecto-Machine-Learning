@@ -403,14 +403,13 @@ sub reset_view {
     my ($self) = @_;
     $self->{auto_scale_y} = 1;
     $self->{visible_bars} = 100;
-    
+
     my $total_candles = $self->{market_data}->size();
     my $margin = $self->{visible_bars} * 0.15;
-    
-    # Volver al presente y dejar margen derecho
+
     $self->{offset} = $total_candles - $self->{visible_bars} + $margin;
     $self->_clamp_offset();
-    
+
     $self->request_render();
 }
 

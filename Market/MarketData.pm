@@ -2,12 +2,13 @@ package Market::MarketData;
 
 use strict;
 use warnings;
+use POSIX qw(floor);
 
 sub new {
     my ($class) = @_;
     my $self = {
-        data          => {},       # Hash para almacenar { '1m' => [], '5m' => [], ... }
-        current_tf    => '1m',     # Temporalidad por defecto
+        data       => {},
+        current_tf => '1m',
     };
     bless $self, $class;
     return $self;
@@ -15,83 +16,93 @@ sub new {
 
 sub add_candle {
     my ($self, $candle) = @_;
-    # Asumimos que la entrada principal siempre llega en la menor temporalidad (ej: 1m)
     push @{ $self->{data}->{'1m'} }, $candle;
 }
 
-
+# ================================================================
+# build_tf_candles — agrupación por tiempo real (NO por índice)
+#
+# Para cada vela de 1m se calcula su "bucket" temporal:
+#   bucket = floor(minuto_del_día / N) * N
+# donde minuto_del_día = hora*60 + minuto
+# y N es el número de minutos de la temporalidad objetivo.
+#
+# Esto garantiza que, por ejemplo en 5m:
+#   00:00–00:04 → bucket 0  (vela 00:00)
+#   00:05–00:09 → bucket 5  (vela 00:05)
+#   etc.
+# y que el bucket 0 de cada día siempre coincide con la primera
+# vela real de ese día (pivote), eliminando el desfase.
+# ================================================================
 sub build_tf_candles {
     my ($self, $target_tf) = @_;
-    
-    # 1. Determinar el factor de agrupación (N)
-    # Asumimos que la temporalidad base en la memoria es '1m'.
-    # Extraemos el valor numérico de la cadena (ej. de '5m' extraemos 5)
-    my ($n) = $target_tf =~ /(\d+)/; 
-    
-    # Validamos que tengamos datos base de 1m para procesar
-    return unless exists $self->{data}->{'1m'} && @{ $self->{data}->{'1m'} } > 0;
-    
-    my $base_data = $self->{data}->{'1m'};
-    my @aggregated_data;
-    my $total_candles = scalar @$base_data;
-    
-    # 2. Iterar sobre el vector base dando "saltos" del tamaño de N
-    for (my $i = 0; $i < $total_candles; $i += $n) {
-        
-        # Calcular el índice final del bloque actual
-        # Si estamos al final y no hay N velas exactas, cerramos con la última disponible
-        my $end_idx = $i + $n - 1;
-        $end_idx = $total_candles - 1 if $end_idx >= $total_candles;
-        
-        # 3. Aplicar las ecuaciones: Open, Close y Timestamp son O(1)
-        my $open      = $base_data->[$i]->{open};
-        my $close     = $base_data->[$end_idx]->{close};
-        my $timestamp = $base_data->[$i]->{timestamp};
-        
-        # Inicializar High, Low y Volume para la reducción
-        my $high   = $base_data->[$i]->{high};
-        my $low    = $base_data->[$i]->{low};
-        my $volume = 0;
-        
-        # 4. Operaciones iterativas de reducción en O(N) para High, Low y Volume
-        for my $j ($i .. $end_idx) {
-            my $candle = $base_data->[$j];
-            
-            $high = $candle->{high} if $candle->{high} > $high;
-            $low  = $candle->{low}  if $candle->{low}  < $low;
-            $volume += $candle->{volume};
-        }
-        
-        # 5. Insertar la nueva vela agregada al final de nuestro nuevo arreglo
-        push @aggregated_data, {
-            timestamp => $timestamp,
-            open      => $open,
-            high      => $high,
-            low       => $low,
-            close     => $close,
-            volume    => $volume,
-        };
-    }
-    
-    # 6. Almacenar el nuevo vector de la temporalidad en el hash central
-    $self->{data}->{$target_tf} = \@aggregated_data;
-}
 
+    my ($n) = $target_tf =~ /(\d+)/;
+    return unless $n && $n > 0;
+    return unless exists $self->{data}->{'1m'} && @{ $self->{data}->{'1m'} } > 0;
+
+    my $base_data = $self->{data}->{'1m'};
+    my @aggregated;
+    my %bucket_map;   # "YYYY-MM-DD:bucket" → índice en @aggregated
+
+    for my $candle (@$base_data) {
+        my $ts = $candle->{timestamp};
+
+        # Extraer fecha y hora del timestamp (soporta offset timezone)
+        my ($date, $hour, $min);
+        if ($ts =~ /(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/) {
+            $date = $1;
+            $hour = $2 + 0;
+            $min  = $3 + 0;
+        } else {
+            next;  # timestamp no reconocido
+        }
+
+        my $day_minute = $hour * 60 + $min;
+        my $bucket     = floor($day_minute / $n) * $n;
+        my $key        = "$date:$bucket";
+
+        if (!exists $bucket_map{$key}) {
+            # Primera vela del bucket → inicializar
+            my $bucket_hour = floor($bucket / 60);
+            my $bucket_min  = $bucket % 60;
+            my $bucket_ts   = sprintf("%sT%02d:%02d:00", $date, $bucket_hour, $bucket_min);
+            # Preservar offset de zona horaria si existe
+            if ($ts =~ /([-+]\d{2}:\d{2})$/) {
+                $bucket_ts .= $1;
+            }
+
+            push @aggregated, {
+                timestamp => $bucket_ts,
+                open      => $candle->{open},
+                high      => $candle->{high},
+                low       => $candle->{low},
+                close     => $candle->{close},
+                volume    => $candle->{volume},
+            };
+            $bucket_map{$key} = $#aggregated;
+        } else {
+            # Vela adicional en el mismo bucket → actualizar
+            my $idx = $bucket_map{$key};
+            $aggregated[$idx]->{high}   = $candle->{high}   if $candle->{high}   > $aggregated[$idx]->{high};
+            $aggregated[$idx]->{low}    = $candle->{low}    if $candle->{low}    < $aggregated[$idx]->{low};
+            $aggregated[$idx]->{close}  = $candle->{close};
+            $aggregated[$idx]->{volume} += $candle->{volume};
+        }
+    }
+
+    $self->{data}->{$target_tf} = \@aggregated;
+}
 
 sub build_timeframes {
     my ($self) = @_;
-    
-    # Construimos las temporalidades requeridas en la arquitectura (ej. 5m y 15m)
     $self->build_tf_candles('5m');
     $self->build_tf_candles('15m');
-    
-    # Setear la vista inicial (por defecto 1m, o la que consideres)
     $self->set_timeframe('1m');
 }
 
 sub set_timeframe {
     my ($self, $tf) = @_;
-    # Afecta qué datos se usan al seleccionar la temporalidad activa
     if (exists $self->{data}->{$tf}) {
         $self->{current_tf} = $tf;
     } else {
@@ -101,19 +112,14 @@ sub set_timeframe {
 
 sub _active_array {
     my ($self) = @_;
-    # Devuelve el array activo según timeframe. Abstracción interna clave.
     return $self->{data}->{ $self->{current_tf} };
 }
 
 sub get_slice {
     my ($self, $start, $end) = @_;
     my $array_ref = $self->_active_array();
-    
-    # Protecciones de límites para evitar errores de índice
-    $start = 0 if $start < 0;
-    $end = $#{$array_ref} if $end > $#{$array_ref};
-    
-    # Retorna un subconjunto de velas
+    $start = 0                  if $start < 0;
+    $end   = $#{$array_ref}     if $end > $#{$array_ref};
     return [ @{$array_ref}[$start .. $end] ];
 }
 
@@ -140,21 +146,14 @@ sub get_timestamp {
 sub last_index {
     my ($self) = @_;
     my $array_ref = $self->_active_array();
-    
-    # Si el arreglo no existe o está vacío, retornamos undef
     return undef unless $array_ref && @$array_ref;
-    
-    # En Perl, $#array devuelve el último índice válido (N - 1)
-    return $#{$array_ref}; 
+    return $#{$array_ref};
 }
 
 sub get_candle {
     my ($self, $index) = @_;
     my $array_ref = $self->_active_array();
-    
-    # Protecciones para evitar que el indicador pida un índice fuera de rango
     return undef if !defined $index || $index < 0 || $index > $#{$array_ref};
-    
     return $array_ref->[$index];
 }
 
