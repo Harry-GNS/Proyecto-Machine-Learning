@@ -31,10 +31,16 @@ sub new {
         drag_start_x      => 0,
         drag_start_offset => 0,
 
-        auto_scale_y   => 1, 
+        auto_scale_y   => 1,
         manual_min_y   => 0,
         manual_max_y   => 0,
         drag_start_y   => 0,
+
+        # Escala vertical independiente para el panel ATR
+        auto_scale_atr  => 1,
+        manual_min_atr  => 0,
+        manual_max_atr  => 0,
+        drag_start_atr  => 0,
     };
     bless $self, $class;
 
@@ -113,7 +119,14 @@ sub render {
     # Panel Secundario (ATR)
     my $atr_width  = $self->{atr_canvas}->width;
     my $atr_height = $self->{atr_canvas}->height;
-    my ($atr_min, $atr_max) = $self->{atr_panel}->get_y_range($atr_slice);
+
+    my ($atr_min, $atr_max);
+    if ($self->{auto_scale_atr}) {
+        ($atr_min, $atr_max) = $self->{atr_panel}->get_y_range($atr_slice);
+    } else {
+        $atr_min = $self->{manual_min_atr};
+        $atr_max = $self->{manual_max_atr};
+    }
 
     my $atr_scale = Market::Panels::Scales->new(
         width        => $atr_width,
@@ -254,15 +267,92 @@ sub bind_events {
     $self->{atr_canvas}->Tk::bind('<ButtonPress-1>', sub {
         my ($c) = @_;
         my $ev = $c->XEvent;
-        # Pasamos 'undef' en Y y Width para forzar que el ATR solo se mueva horizontalmente
-        $self->_on_drag_start($ev->x, undef, undef); 
+        # Si el clic es sobre la escala derecha → modo zoom vertical ATR
+        my $escala_sensible = 70;
+        if ($ev->x > ($c->width - $escala_sensible)) {
+            $self->{drag_mode}    = 'atr_vertical';
+            $self->{drag_start_atr} = $ev->y;
+            if ($self->{auto_scale_atr}) {
+                my ($start, $end) = $self->compute_window();
+                my $atr_slice = $self->{indicators}->slice_array('ATR', $start, $end);
+                ($self->{manual_min_atr}, $self->{manual_max_atr}) = $self->{atr_panel}->get_y_range($atr_slice);
+                $self->{auto_scale_atr} = 0;
+            }
+        } else {
+            $self->_on_drag_start($ev->x, undef, undef);
+        }
     });
 
     $self->{atr_canvas}->Tk::bind('<B1-Motion>', sub {
         my ($c) = @_;
         my $ev = $c->XEvent;
-        $self->_on_drag_motion($ev->x, undef);
+        if (defined $self->{drag_mode} && $self->{drag_mode} eq 'atr_vertical') {
+            $self->_vertical_drag_atr($ev->y);
+        } else {
+            $self->_on_drag_motion($ev->x, undef);
+        }
         $self->_on_mouse_move($ev->x, $ev->y, 'atr');
+    });
+
+    # Clic derecho en ATR: ancla para zoom vertical con arrastre
+    $self->{atr_canvas}->Tk::bind('<ButtonPress-3>', sub {
+        my ($c) = @_;
+        my $ev = $c->XEvent;
+        $self->{drag_start_atr} = $ev->y;
+        if ($self->{auto_scale_atr}) {
+            my ($start, $end) = $self->compute_window();
+            my $atr_slice = $self->{indicators}->slice_array('ATR', $start, $end);
+            ($self->{manual_min_atr}, $self->{manual_max_atr}) = $self->{atr_panel}->get_y_range($atr_slice);
+            $self->{auto_scale_atr} = 0;
+        }
+    });
+
+    $self->{atr_canvas}->Tk::bind('<B3-Motion>', sub {
+        my ($c) = @_;
+        my $ev = $c->XEvent;
+        $self->_vertical_drag_atr($ev->y);
+    });
+
+    # Doble clic en ATR: restaurar escala automática
+    $self->{atr_canvas}->Tk::bind('<Double-Button-1>', sub {
+        $self->{auto_scale_atr} = 1;
+        $self->request_render();
+    });
+
+    # Zoom horizontal en ATR (scroll normal y Ctrl+scroll)
+    $self->{atr_canvas}->Tk::bind('<Button-4>', sub {
+        $self->_horizontal_zoom(1, 'right');
+        Tk->break;
+    });
+
+    $self->{atr_canvas}->Tk::bind('<Button-5>', sub {
+        $self->_horizontal_zoom(-1, 'right');
+        Tk->break;
+    });
+
+    $self->{atr_canvas}->Tk::bind('<Control-Button-4>', sub {
+        my ($c) = @_;
+        $self->_horizontal_zoom(1, $c->XEvent->x);
+        Tk->break;
+    });
+
+    $self->{atr_canvas}->Tk::bind('<Control-Button-5>', sub {
+        my ($c) = @_;
+        $self->_horizontal_zoom(-1, $c->XEvent->x);
+        Tk->break;
+    });
+
+    # Zoom vertical en ATR (Shift+scroll)
+    $self->{atr_canvas}->Tk::bind('<Shift-Button-4>', sub {
+        my ($c) = @_;
+        $self->_vertical_zoom_atr(1, $c->XEvent->y);
+        Tk->break;
+    });
+
+    $self->{atr_canvas}->Tk::bind('<Shift-Button-5>', sub {
+        my ($c) = @_;
+        $self->_vertical_zoom_atr(-1, $c->XEvent->y);
+        Tk->break;
     });
 
     # NUEVO: Navegación por teclado (Flechas)
@@ -401,8 +491,9 @@ sub _vertical_drag {
 
 sub reset_view {
     my ($self) = @_;
-    $self->{auto_scale_y} = 1;
-    $self->{visible_bars} = 100;
+    $self->{auto_scale_y}   = 1;
+    $self->{auto_scale_atr} = 1;
+    $self->{visible_bars}   = 100;
 
     my $total_candles = $self->{market_data}->size();
     my $margin = $self->{visible_bars} * 0.15;
@@ -576,6 +667,63 @@ sub _pan_vertical {
     $self->{manual_min_y} += $shift;
     $self->{manual_max_y} += $shift;
     
+    $self->request_render();
+}
+
+sub _vertical_zoom_atr {
+    my ($self, $delta, $y) = @_;
+
+    $self->{atr_canvas}->yviewMoveto(0);
+    $self->{atr_canvas}->xviewMoveto(0);
+    $self->{atr_panel}->draw_crosshair(undef, undef);
+
+    if ($self->{auto_scale_atr}) {
+        my ($start, $end) = $self->compute_window();
+        my $atr_slice = $self->{indicators}->slice_array('ATR', $start, $end);
+        ($self->{manual_min_atr}, $self->{manual_max_atr}) = $self->{atr_panel}->get_y_range($atr_slice);
+        $self->{auto_scale_atr} = 0;
+    }
+
+    my $current_range = $self->{manual_max_atr} - $self->{manual_min_atr};
+    return if $current_range <= 0.0001;
+
+    my $height = $self->{atr_canvas}->height;
+    return if $height == 0;
+
+    my $ratio = $y / $height;
+    $ratio = 0 if $ratio < 0;
+    $ratio = 1 if $ratio > 1;
+
+    my $zoom_amount = $current_range * 0.05;
+
+    if ($delta > 0) {
+        $self->{manual_max_atr} -= $zoom_amount * $ratio;
+        $self->{manual_min_atr} += $zoom_amount * (1 - $ratio);
+    } else {
+        $self->{manual_max_atr} += $zoom_amount * $ratio;
+        $self->{manual_min_atr} -= $zoom_amount * (1 - $ratio);
+    }
+
+    $self->request_render();
+}
+
+sub _vertical_drag_atr {
+    my ($self, $y) = @_;
+
+    my $dy = $y - $self->{drag_start_atr};
+    my $canvas_height = $self->{atr_canvas}->height;
+    return if $canvas_height == 0;
+
+    my $price_range = $self->{manual_max_atr} - $self->{manual_min_atr};
+    return if $price_range <= 0;
+
+    my $value_per_pixel = $price_range / $canvas_height;
+    my $shift = $dy * $value_per_pixel;
+
+    $self->{manual_min_atr} += $shift;
+    $self->{manual_max_atr} += $shift;
+
+    $self->{drag_start_atr} = $y;
     $self->request_render();
 }
 

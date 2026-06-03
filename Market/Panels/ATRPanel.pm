@@ -78,7 +78,8 @@ sub render {
     return unless $s && @$data_slice;
 
     # Limpiar fotograma anterior
-    $c->delete('atr_line'); 
+    $c->delete('atr_line');
+    $c->delete('atr_last_label');
 
     my @coords;
     for my $i (0 .. $#{$data_slice}) {
@@ -100,6 +101,62 @@ sub render {
     }
     
     $s->_draw_y_scale($c);
+    $self->render_last_visible_value($data_slice);
+}
+
+sub render_last_visible_value {
+    my ($self, $data_slice) = @_;
+    my $c = $self->{canvas};
+    my $s = $self->{scale};
+
+    $c->delete('atr_last_label');
+    return unless @$data_slice && $s;
+
+    # Buscar el último valor definido del slice visible
+    my $last_val;
+    for my $i (reverse 0 .. $#{$data_slice}) {
+        if (defined $data_slice->[$i]) {
+            $last_val = $data_slice->[$i];
+            last;
+        }
+    }
+    return unless defined $last_val;
+
+    my $y_pos = $s->value_to_y($last_val);
+    my $width = $s->{width};
+
+    my $display_val = sprintf("%.2f", $last_val);
+
+    # Texto
+    my $text_id = $c->createText(
+        $width - 5, $y_pos,
+        -text   => $display_val,
+        -fill   => 'white',
+        -anchor => 'e',
+        -font   => ['Helvetica', 10, 'bold'],
+        -tags   => 'atr_last_label'
+    );
+
+    # Fondo azul (mismo color que la línea ATR)
+    my @bbox = $c->bbox($text_id);
+    if (@bbox) {
+        my ($x1,$y1,$x2,$y2) = ($bbox[0]-4, $bbox[1]-2, $bbox[2]+4, $bbox[3]+2);
+        my $bg_id = $c->createRectangle(
+            $x1, $y1, $x2, $y2,
+            -fill    => '#2962FF',
+            -outline => '#2962FF',
+            -tags    => 'atr_last_label'
+        );
+        $c->lower($bg_id, $text_id);
+    }
+
+    # Línea punteada horizontal hasta el valor
+    $c->createLine(
+        0, $y_pos, $width - 70, $y_pos,
+        -fill => '#2962FF',
+        -dash => '.',
+        -tags => 'atr_last_label'
+    );
 }
 
 sub draw_crosshair {
