@@ -22,12 +22,11 @@ sub calculate {
 
     $self->{data} = [];
 
-    # Inicializar estructuras base
     for (0 .. $size - 1) {
         push @{$self->{data}}, { state => 'none', events => [] };
     }
 
-    # FASE 1: Detección de Swing Points 
+    # FASE 1: Detección de Swing Points (Picos y Valles)
     for my $i ($k .. $size - $k - 1) {
         my $current = $market_data->get_candle($i);
         my $is_swing_high = 1;
@@ -49,24 +48,77 @@ sub calculate {
         }
     }
 
-    # FASE 2 OPTIMIZADA: Escáner Lineal de Alta Velocidad (Single-Pass)
-    # Solo procesamos los niveles que sigan "vivos"
+    # =========================================================================
+    # NUEVO: Cálculo dinámico e integrado del ATR (Periodo 14) O(N)
+    # =========================================================================
+    my @atr;
+    my $n_atr = 14;
+    for my $i (0 .. $size - 1) {
+        my $c = $market_data->get_candle($i);
+        my $tr = $c->{high} - $c->{low};
+        if ($i > 0) {
+            my $pc = $market_data->get_candle($i - 1)->{close};
+            my $h_pc = abs($c->{high} - $pc);
+            my $l_pc = abs($c->{low} - $pc);
+            $tr = $h_pc if $h_pc > $tr;
+            $tr = $l_pc if $l_pc > $tr;
+        }
+        if ($i < $n_atr) {
+            $atr[$i] = $tr;
+        } else {
+            $atr[$i] = (($atr[$i-1] * ($n_atr - 1)) + $tr) / $n_atr;
+        }
+    }
+
+    # FASE 2: Escáner Lineal con Tolerancia Dinámica (EQH / EQL)
     my @active_highs;
     my @active_lows;
 
     for my $i (0 .. $size - 1) {
         my $type = $self->{data}->[$i]->{state};
-        
-        # Registrar nuevos niveles que acaban de aparecer
-        if ($type eq 'swing_high') { push @active_highs, $i; }
-        elsif ($type eq 'swing_low') { push @active_lows, $i; }
-
         my $candle = $market_data->get_candle($i);
+        
+        # Calcular umbral de tolerancia exacto para esta vela (ATR * 0.10)
+        my $current_atr = $atr[$i] // 0;
+        my $tolerance = $current_atr * 0.10; 
 
-        # --- Evaluar Rupturas de BSL (Altos) ---
+        # 1. Agrupar Pivotes Cercanos en EQH / EQL basados en la tolerancia
+        if ($type eq 'swing_high') {
+            my $matched = 0;
+            for my $origin_idx (@active_highs) {
+                my $old_price = $self->{data}->[$origin_idx]->{price};
+                if (abs($old_price - $candle->{high}) <= $tolerance) {
+                    # Convertir el nivel antiguo en Equal High
+                    $self->{data}->[$origin_idx]->{state} = 'eqh';
+                    # Ajustar el precio al extremo más alto para evitar auto-barrido
+                    $self->{data}->[$origin_idx]->{price} = $candle->{high} > $old_price ? $candle->{high} : $old_price;
+                    $matched = 1;
+                    last;
+                }
+            }
+            # Solo crear una nueva línea si no hizo "match" con un nivel pasado
+            push @active_highs, $i if !$matched;
+        }
+        elsif ($type eq 'swing_low') {
+            my $matched = 0;
+            for my $origin_idx (@active_lows) {
+                my $old_price = $self->{data}->[$origin_idx]->{price};
+                if (abs($old_price - $candle->{low}) <= $tolerance) {
+                    # Convertir el nivel antiguo en Equal Low
+                    $self->{data}->[$origin_idx]->{state} = 'eql';
+                    # Ajustar el precio al extremo más bajo
+                    $self->{data}->[$origin_idx]->{price} = $candle->{low} < $old_price ? $candle->{low} : $old_price;
+                    $matched = 1;
+                    last;
+                }
+            }
+            push @active_lows, $i if !$matched;
+        }
+
+        # 2. Evaluar Rupturas (Sweeps, Grabs, Runs)
+        # --- BSL y EQH ---
         my @new_active_highs;
         for my $origin_idx (@active_highs) {
-            # Ignorar si el nivel acaba de formarse (esperar el margen k)
             if ($i <= $origin_idx + $k) {
                 push @new_active_highs, $origin_idx;
                 next;
@@ -75,10 +127,8 @@ sub calculate {
             my $level_price = $self->{data}->[$origin_idx]->{price};
             
             if ($candle->{high} > $level_price) {
-                # ¡Nivel barrido! Resolvamos la máquina de estados sin loops largos
                 my $resolved = 0;
                 
-                # 1. Sweep
                 if ($candle->{close} < $level_price) {
                     $self->{data}->[$origin_idx]->{end_index} = $i;
                     $self->{data}->[$origin_idx]->{resolution} = 'sweep';
@@ -86,7 +136,6 @@ sub calculate {
                     $resolved = 1;
                 }
                 
-                # 2. Run
                 if (!$resolved && $i + $n_run - 1 < $size) {
                     my $is_run = 1;
                     for my $m (0 .. $n_run - 1) {
@@ -102,7 +151,6 @@ sub calculate {
                     }
                 }
                 
-                # 3. Grab
                 if (!$resolved) {
                     my $is_grab = 0;
                     my $grab_end_idx = $i;
@@ -123,18 +171,16 @@ sub calculate {
                     }
                 }
 
-                # Si cruzó pero estamos ciegos del futuro (por estar en Replay), truncamos la línea aquí
                 if (!$resolved) {
                     $self->{data}->[$origin_idx]->{end_index} = $i;
                 }
             } else {
-                # El nivel sobrevivió a esta vela, lo guardamos para evaluarlo en el futuro
                 push @new_active_highs, $origin_idx;
             }
         }
         @active_highs = @new_active_highs;
 
-        # --- Evaluar Rupturas de SSL (Bajos) ---
+        # --- SSL y EQL ---
         my @new_active_lows;
         for my $origin_idx (@active_lows) {
             if ($i <= $origin_idx + $k) {
@@ -147,7 +193,6 @@ sub calculate {
             if ($candle->{low} < $level_price) {
                 my $resolved = 0;
                 
-                # 1. Sweep
                 if ($candle->{close} > $level_price) {
                     $self->{data}->[$origin_idx]->{end_index} = $i;
                     $self->{data}->[$origin_idx]->{resolution} = 'sweep';
@@ -155,7 +200,6 @@ sub calculate {
                     $resolved = 1;
                 }
                 
-                # 2. Run
                 if (!$resolved && $i + $n_run - 1 < $size) {
                     my $is_run = 1;
                     for my $m (0 .. $n_run - 1) {
@@ -171,7 +215,6 @@ sub calculate {
                     }
                 }
                 
-                # 3. Grab
                 if (!$resolved) {
                     my $is_grab = 0;
                     my $grab_end_idx = $i;
@@ -202,7 +245,7 @@ sub calculate {
         @active_lows = @new_active_lows;
     }
 
-    # Limpieza: Los niveles que nunca fueron rotos se extienden hasta el final del gráfico
+    # Limpieza final
     for my $origin_idx (@active_highs, @active_lows) {
         $self->{data}->[$origin_idx]->{end_index} = $size - 1;
         $self->{data}->[$origin_idx]->{resolution} = 'active';

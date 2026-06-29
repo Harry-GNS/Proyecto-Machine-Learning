@@ -105,9 +105,14 @@ sub set_timeframe {
     }
 }
 
+# =====================================================================
+# RUTINAS DE ACCESO BLINDADAS CONTRA UNDEF
+# =====================================================================
 sub _active_array {
     my ($self) = @_;
-    return $self->{data}->{ $self->{current_tf} };
+    # BLINDAJE MAESTRO: Si la temporalidad actual no tiene datos o es undef, 
+    # devolvemos un arreglo vacío [] en lugar de undef.
+    return $self->{data}->{ $self->{current_tf} } // [];
 }
 
 # =====================================================================
@@ -128,23 +133,26 @@ sub step_replay {
     my ($self, $steps) = @_;
     return unless $self->{replay_mode};
     my $array_ref = $self->_active_array();
+    
     $self->{replay_index} += $steps;
-    $self->{replay_index} = $#{$array_ref} if $self->{replay_index} > $#{$array_ref};
+    # Protegemos el avance comprobando primero que el arreglo tenga elementos
+    $self->{replay_index} = $#{$array_ref} if @$array_ref && $self->{replay_index} > $#{$array_ref};
     $self->{replay_index} = 0 if $self->{replay_index} < 0;
 }
 
 sub size {
     my ($self) = @_;
     my $array_ref = $self->_active_array();
-    # Si estamos en replay, el sistema cree que la data termina en replay_index
+    # Si el arreglo está vacío, el tamaño es 0 directo
+    return 0 unless @$array_ref; 
     return $self->{replay_mode} ? $self->{replay_index} + 1 : scalar @{$array_ref};
 }
 
 sub get_slice {
     my ($self, $start, $end) = @_;
     my $array_ref = $self->_active_array();
+    return [] unless @$array_ref;
     
-    # Restricción de filtrado
     my $max_limit = $self->{replay_mode} ? $self->{replay_index} : $#{$array_ref};
     
     $start = 0 if $start < 0;
@@ -157,14 +165,18 @@ sub get_slice {
 sub last_candle {
     my ($self) = @_;
     my $array_ref = $self->_active_array();
+    return undef unless @$array_ref;
+    
     my $idx = $self->{replay_mode} ? $self->{replay_index} : $#{$array_ref};
-    return $array_ref->[$idx] if @{$array_ref} && $idx >= 0;
+    return $array_ref->[$idx] if $idx >= 0;
     return undef;
 }
 
 sub get_timestamp {
     my ($self, $index) = @_;
     my $array_ref = $self->_active_array();
+    return undef unless @$array_ref;
+    
     return $array_ref->[$index]->{timestamp} if defined $array_ref->[$index];
     return undef;
 }
@@ -172,16 +184,19 @@ sub get_timestamp {
 sub last_index {
     my ($self) = @_;
     my $array_ref = $self->_active_array();
-    return undef unless $array_ref && @$array_ref;
+    return undef unless @$array_ref;
+    
     return $self->{replay_mode} ? $self->{replay_index} : $#{$array_ref};
 }
 
 sub get_candle {
     my ($self, $index) = @_;
     my $array_ref = $self->_active_array();
+    return undef unless @$array_ref;
+    
     return undef if !defined $index || $index < 0 || $index > $#{$array_ref};
-    # Seguridad adicional para Replay
     return undef if $self->{replay_mode} && $index > $self->{replay_index};
+    
     return $array_ref->[$index];
 }
 

@@ -9,6 +9,7 @@ use Market::Panels::PricePanel;
 use Market::Panels::ATRPanel;
 
 use Market::Overlays::Liquidity;
+use Market::Overlays::SMC_Structures;
 sub new {
     my ($class, %args) = @_;
     
@@ -53,7 +54,7 @@ sub new {
 
     # NUEVO: Inicializar el Overlay de Liquidez
     $self->{liquidity_overlay} = Market::Overlays::Liquidity->new(canvas => $self->{price_canvas});
-
+    $self->{smc_overlay} = Market::Overlays::SMC_Structures->new(canvas => $self->{price_canvas});
     $self->bind_events();
     return $self;
 }
@@ -124,6 +125,11 @@ sub render {
     # =========================================================
     my $liq_slice = $self->{indicators}->slice_array('Liquidity', $start, $end);
     $self->{liquidity_overlay}->render($scale, $liq_slice);
+    # ========================================================
+    # NUEVO: Renderizar Overlay de Estructuras SMC
+    # ========================================================
+    my $smc_slice = $self->{indicators}->slice_array('SMC_Structures', $start, $end);
+    $self->{smc_overlay}->render($scale, $smc_slice);
     
     # Panel Secundario (ATR)
     my $atr_width  = $self->{atr_canvas}->width;

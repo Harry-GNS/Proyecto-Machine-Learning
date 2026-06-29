@@ -7,6 +7,7 @@ use lib '/home/davidandresvm/Documentos/ProyectoMLv2';
 
 use FindBin;
 use lib $FindBin::Bin;
+use utf8;
 
 use Tk;
 use Market::MarketData;
@@ -112,6 +113,28 @@ $indicators->register('ATR', Market::Indicators::ATR->new(14));
 use Market::Indicators::Liquidity;
 $indicators->register('Liquidity', Market::Indicators::Liquidity->new(depth => 3));
 
+# Registrar el motor analítico de Estructuras SMC (Paso 2)
+use Market::Indicators::SMC_Structures;
+$indicators->register('SMC_Structures', Market::Indicators::SMC_Structures->new(depth => 3));
+
+# ==============================================================================
+# DEPURACIÓN: Verificar detección de BOS y CHOCH
+# ==============================================================================
+print "\n--- DEPURACION: Estructuras SMC ---\n";
+$indicators->recalculate_all($market);
+my $smc_data = $indicators->slice_array('SMC_Structures', 0, $market->size() - 1);
+
+for my $i (0 .. $#$smc_data) {
+    my $punto = $smc_data->[$i];
+    if (defined $punto && exists $punto->{events} && @{$punto->{events}}) {
+        my $timestamp = $market->get_timestamp($i);
+        for my $ev (@{$punto->{events}}) {
+            print "[$timestamp] Evento: $ev->{type} ($ev->{dir}) detectado en precio $ev->{price}\n";
+        }
+    }
+}
+print "--- FIN DE DEPURACION ---\n\n";
+
 # ==============================================================================
 # 3. Lectura y Carga de Datos (CSV) [cite: 610]
 # ==============================================================================
@@ -151,7 +174,7 @@ $market->build_timeframes();
 # ==============================================================================
 # DEPURACIÓN: Verificar detección de Swing Points en la temporalidad base
 # ==============================================================================
-print "\n--- DEPURACION: Buscando Swing Points (k=3) ---\n";
+
 $indicators->recalculate_all($market);
 my $liq_data = $indicators->slice_array('Liquidity', 0, $market->size() - 1);
 
@@ -166,7 +189,7 @@ for my $i (0 .. $#$liq_data) {
         }
     }
 }
-print "--- FIN DE DEPURACION ---\n\n";
+
 
 # ==============================================================================
 # 4. Inicialización del Motor de Renderizado y Bucle de Eventos [cite: 608]

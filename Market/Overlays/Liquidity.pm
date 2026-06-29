@@ -2,11 +2,15 @@ package Market::Overlays::Liquidity;
 
 use strict;
 use warnings;
+use utf8; # <-- Obligatorio para que Tk dibuje las flechas ↑ y ↓ correctamente
 
 sub new {
     my ($class, %args) = @_;
     my $self = {
         canvas => $args{canvas},
+        # Colores configurables para EQH y EQL según la Tabla 2
+        color_eqh => $args{color_eqh} || '#FFD600', # Amarillo por defecto
+        color_eql => $args{color_eql} || '#FFD600',
     };
     bless $self, $class;
     return $self;
@@ -37,51 +41,68 @@ sub render {
         my $punto = $liquidity_slice->[$i];
         next if !$punto;
 
-        # 1. RENDERIZADO DE LÍNEAS DE LIQUIDEZ RE CORTADAS POR LA MÁQUINA DE ESTADOS
+        # =========================================================================
+        # 1. RENDERIZADO DE LÍNEAS ESTRUCTURALES Y ETIQUETAS BASE (BSL, SSL, EQH, EQL)
+        # =========================================================================
         if (defined $punto->{state} && $punto->{state} ne 'none') {
             my $level_price = $punto->{price};
             my $end_idx = $punto->{end_index} // $i;
 
-            # Calcular posiciones en píxeles basándose en los índices reales del rebanado visible
             my $x_start = ($i - $offset_frac) * $candle_width + ($candle_width / 2);
             my $x_end   = ($end_idx - $offset_frac) * $candle_width + ($candle_width / 2);
-            
             my $y = $height - ((($level_price - $min_val) / $range) * $height);
             
-            next if $y < -100 || $y > $height + 100; # No dibujar si está fuera de pantalla
+            next if $y < -100 || $y > $height + 100;
 
+            # --- Buy Side Liquidity (BSL) ---
             if ($punto->{state} eq 'swing_high') {
-                # Línea de BSL (Roja) [cite: 104]
                 $c->createLine(
                     $x_start, $y, $x_end, $y,
-                    -dash => '.', -fill => '#FF5252', -width => 1.5,
+                    -dash => '.', -fill => '#FF5252', -width => 1.5, # Rojo
                     -tags => ['liquidity_overlay']
                 );
                 if ($punto->{resolution} eq 'active') {
-                    $c->createText(
-                        $x_end - 5, $y - 10,
-                        -text => 'BSL', -fill => '#FF5252', -anchor => 'e', -font => 'Helvetica 8 bold',
-                        -tags => ['liquidity_overlay']
-                    );
+                    $c->createText($x_end - 5, $y - 10, -text => 'BSL', -fill => '#FF5252', -anchor => 'e', -font => 'Helvetica 8 bold', -tags => ['liquidity_overlay']);
                 }
-            } elsif ($punto->{state} eq 'swing_low') {
-                # Línea de SSL (Verde) [cite: 104]
+            } 
+            # --- Sell Side Liquidity (SSL) ---
+            elsif ($punto->{state} eq 'swing_low') {
                 $c->createLine(
                     $x_start, $y, $x_end, $y,
-                    -dash => '.', -fill => '#00E676', -width => 1.5,
+                    -dash => '.', -fill => '#00E676', -width => 1.5, # Verde[cite: 3]
                     -tags => ['liquidity_overlay']
                 );
                 if ($punto->{resolution} eq 'active') {
-                    $c->createText(
-                        $x_end - 5, $y + 10,
-                        -text => 'SSL', -fill => '#00E676', -anchor => 'e', -font => 'Helvetica 8 bold',
-                        -tags => ['liquidity_overlay']
-                    );
+                    $c->createText($x_end - 5, $y + 10, -text => 'SSL', -fill => '#00E676', -anchor => 'e', -font => 'Helvetica 8 bold', -tags => ['liquidity_overlay']);
+                }
+            }
+            # --- Equal Highs (EQH) ---
+            elsif ($punto->{state} eq 'eqh') {
+                $c->createLine(
+                    $x_start, $y, $x_end, $y,
+                    -fill => $self->{color_eqh}, -width => 2.0, # Configurable[cite: 3]
+                    -tags => ['liquidity_overlay']
+                );
+                if ($punto->{resolution} eq 'active') {
+                    $c->createText($x_end - 5, $y - 10, -text => 'EQH', -fill => $self->{color_eqh}, -anchor => 'e', -font => 'Helvetica 8 bold', -tags => ['liquidity_overlay']);
+                }
+            }
+            # --- Equal Lows (EQL) ---
+            elsif ($punto->{state} eq 'eql') {
+                $c->createLine(
+                    $x_start, $y, $x_end, $y,
+                    -fill => $self->{color_eql}, -width => 2.0, # Configurable[cite: 3]
+                    -tags => ['liquidity_overlay']
+                );
+                if ($punto->{resolution} eq 'active') {
+                    $c->createText($x_end - 5, $y + 10, -text => 'EQL', -fill => $self->{color_eql}, -anchor => 'e', -font => 'Helvetica 8 bold', -tags => ['liquidity_overlay']);
                 }
             }
         }
 
-        # 2. RENDERIZADO DE ETIQUETAS DE EVENTOS DE RESOLUCIÓN DE LIQUIDEZ 
+        # =========================================================================
+        # 2. RENDERIZADO DE MÁQUINA DE ESTADOS (SWEEP, GRAB, RUN)
+        # =========================================================================
         if (exists $punto->{events} && @{$punto->{events}}) {
             for my $ev (@{$punto->{events}}) {
                 my $x_event = ($i - $offset_frac) * $candle_width + ($candle_width / 2);
@@ -89,21 +110,25 @@ sub render {
 
                 next if $y_event < 0 || $y_event > $height;
 
+                # Sweep Up: Rojo, "SWEEP ↑"[cite: 3]
                 if ($ev->{type} eq 'sweep_up') {
                     $c->createText($x_event, $y_event - 15, -text => 'SWEEP ↑', 
                         -fill => '#FF5252', -font => 'Helvetica 9 bold', -tags => ['liquidity_overlay']);
                 } 
+                # Sweep Down: Verde, "SWEEP↓" (Sin espacio según Tabla 2)[cite: 3]
                 elsif ($ev->{type} eq 'sweep_down') {
-                    $c->createText($x_event, $y_event + 15, -text => 'SWEEP ↓', 
+                    $c->createText($x_event, $y_event + 15, -text => 'SWEEP↓', 
                         -fill => '#00E676', -font => 'Helvetica 9 bold', -tags => ['liquidity_overlay']);
                 } 
+                # Liquidity Grab: Naranja, "LQ GRAB"[cite: 3]
                 elsif ($ev->{type} eq 'grab_up' || $ev->{type} eq 'grab_down') {
                     $c->createText($x_event, $y_event - 15, -text => 'LQ GRAB', 
-                        -fill => '#FF9100', -font => 'Helvetica 9 bold', -tags => ['liquidity_overlay']); # Naranja [cite: 105]
+                        -fill => '#FF9100', -font => 'Helvetica 9 bold', -tags => ['liquidity_overlay']); 
                 } 
+                # Liquidity Run: Azul, "LQ RUN"[cite: 3]
                 elsif ($ev->{type} eq 'run_up' || $ev->{type} eq 'run_down') {
                     $c->createText($x_event, $y_event - 15, -text => 'LQ RUN', 
-                        -fill => '#2979FF', -font => 'Helvetica 9 bold', -tags => ['liquidity_overlay']); # Azul [cite: 105]
+                        -fill => '#2979FF', -font => 'Helvetica 9 bold', -tags => ['liquidity_overlay']); 
                 }
             }
         }
