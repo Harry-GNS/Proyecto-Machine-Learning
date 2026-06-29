@@ -108,6 +108,10 @@ my $indicators = Market::IndicatorManager->new();
 # Registrar el indicador ATR con un periodo estándar de 14 [cite: 612]
 $indicators->register('ATR', Market::Indicators::ATR->new(14));
 
+# Registrar el motor analítico de Liquidez (Paso 1)
+use Market::Indicators::Liquidity;
+$indicators->register('Liquidity', Market::Indicators::Liquidity->new(depth => 3));
+
 # ==============================================================================
 # 3. Lectura y Carga de Datos (CSV) [cite: 610]
 # ==============================================================================
@@ -144,6 +148,25 @@ print "Carga completada. Total de velas base: " . $market->size() . "\n";
 
 # Invocar la actualización del mercado construyendo las agregaciones temporales [cite: 611]
 $market->build_timeframes();
+# ==============================================================================
+# DEPURACIÓN: Verificar detección de Swing Points en la temporalidad base
+# ==============================================================================
+print "\n--- DEPURACION: Buscando Swing Points (k=3) ---\n";
+$indicators->recalculate_all($market);
+my $liq_data = $indicators->slice_array('Liquidity', 0, $market->size() - 1);
+
+for my $i (0 .. $#$liq_data) {
+    my $punto = $liq_data->[$i];
+    if (defined $punto && $punto->{state} ne 'none') {
+        my $timestamp = $market->get_timestamp($i);
+        if ($punto->{state} eq 'swing_high') {
+            print "[$timestamp] SWING HIGH detectado en precio: $punto->{price}\n";
+        } elsif ($punto->{state} eq 'swing_low') {
+            print "[$timestamp] SWING LOW detectado en precio: $punto->{price}\n";
+        }
+    }
+}
+print "--- FIN DE DEPURACION ---\n\n";
 
 # ==============================================================================
 # 4. Inicialización del Motor de Renderizado y Bucle de Eventos [cite: 608]
