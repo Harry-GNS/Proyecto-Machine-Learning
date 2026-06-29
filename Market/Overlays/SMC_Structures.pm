@@ -136,6 +136,10 @@ sub render {
             -dash => '-', -fill => $color, -width => 1,
             -tags => ['smc_overlay']
         );
+    
+    # Empuja toda la capa SMC hacia el fondo, permitiendo que 
+    # las velas y mechas del PricePanel se vean nítidas por encima.
+    $c->lower('smc_overlay');
     }
 }
 

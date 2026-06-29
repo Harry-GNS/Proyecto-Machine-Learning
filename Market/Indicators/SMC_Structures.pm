@@ -52,17 +52,22 @@ sub calculate {
             push @active_fvgs, $fvg;
         }
 
-        # Mitigación de FVG: Si el precio actual rellena el bloque activo
+        # Mitigación de FVG: Si el precio posterior rellena el bloque activo
         my @remaining_fvgs;
         for my $fvg (@active_fvgs) {
             my $mitigated = 0;
-            if ($fvg->{type} eq 'bullish_fvg' && $c3->{low} <= $fvg->{top}) {
-                $fvg->{mitigated_idx} = $i; # Se marca la vela exacta donde se desvanece
-                $mitigated = 1;
-            }
-            elsif ($fvg->{type} eq 'bearish_fvg' && $c3->{high} >= $fvg->{bottom}) {
-                $fvg->{mitigated_idx} = $i;
-                $mitigated = 1;
+            
+            # SOLUCIÓN: Solo evaluar si la vela actual es estrictamente 
+            # posterior a la vela de confirmación del FVG.
+            if ($i > $fvg->{start_idx} + 1) {
+                if ($fvg->{type} eq 'bullish_fvg' && $c3->{low} <= $fvg->{top}) {
+                    $fvg->{mitigated_idx} = $i; 
+                    $mitigated = 1;
+                }
+                elsif ($fvg->{type} eq 'bearish_fvg' && $c3->{high} >= $fvg->{bottom}) {
+                    $fvg->{mitigated_idx} = $i;
+                    $mitigated = 1;
+                }
             }
             
             push @remaining_fvgs, $fvg if !$mitigated;
