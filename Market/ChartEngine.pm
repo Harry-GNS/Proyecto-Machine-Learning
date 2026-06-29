@@ -8,6 +8,7 @@ use Market::Panels::Scales;
 use Market::Panels::PricePanel;
 use Market::Panels::ATRPanel;
 
+use Market::Overlays::Liquidity;
 sub new {
     my ($class, %args) = @_;
     
@@ -49,6 +50,9 @@ sub new {
 
     $self->{price_panel} = Market::Panels::PricePanel->new(canvas => $self->{price_canvas});
     $self->{atr_panel}   = Market::Panels::ATRPanel->new(canvas => $self->{atr_canvas});
+
+    # NUEVO: Inicializar el Overlay de Liquidez
+    $self->{liquidity_overlay} = Market::Overlays::Liquidity->new(canvas => $self->{price_canvas});
 
     $self->bind_events();
     return $self;
@@ -115,6 +119,11 @@ sub render {
 
     $self->{price_panel}->set_scale($scale);
     $self->{price_panel}->render($data_slice);
+    # =========================================================
+    # NUEVO: Renderizar Overlay de Liquidez
+    # =========================================================
+    my $liq_slice = $self->{indicators}->slice_array('Liquidity', $start, $end);
+    $self->{liquidity_overlay}->render($scale, $liq_slice);
     
     # Panel Secundario (ATR)
     my $atr_width  = $self->{atr_canvas}->width;
