@@ -2,7 +2,7 @@ package Market::ChartEngine;
 
 use strict;
 use warnings;
-use lib '/home/davidandresvm/Documentos/Proyecto_IB_G'; # <-- Añade esta línea
+use lib '/home/davidandresvm/Documentos/ProyectoMLv2'; # <-- Añade esta línea
 
 use Market::Panels::Scales;
 use Market::Panels::PricePanel;
@@ -235,14 +235,6 @@ sub bind_events {
         my $ev = $c->XEvent;
         $self->{drag_start_y} = $ev->y;
         
-        # Si estábamos en automático, congelamos el rango actual como punto de partida
-        if ($self->{auto_scale_y}) {
-            my ($start, $end) = $self->compute_window();
-            my $slice = $self->{market_data}->get_slice($start, $end);
-            ($self->{manual_min_y}, $self->{manual_max_y}) = $self->{price_panel}->get_y_range($slice);
-            
-            $self->{auto_scale_y} = 0; # Desactivar modo automático
-        }
     });
 
     # Evento: Arrastre sostenido con clic derecho
@@ -299,12 +291,7 @@ sub bind_events {
         my ($c) = @_;
         my $ev = $c->XEvent;
         $self->{drag_start_atr} = $ev->y;
-        if ($self->{auto_scale_atr}) {
-            my ($start, $end) = $self->compute_window();
-            my $atr_slice = $self->{indicators}->slice_array('ATR', $start, $end);
-            ($self->{manual_min_atr}, $self->{manual_max_atr}) = $self->{atr_panel}->get_y_range($atr_slice);
-            $self->{auto_scale_atr} = 0;
-        }
+
     });
 
     $self->{atr_canvas}->Tk::bind('<B3-Motion>', sub {
@@ -467,6 +454,9 @@ sub _on_drag_motion {
 sub _vertical_drag {
     my ($self, $y) = @_;
     
+    # NUEVO: Abortar inmediatamente si estamos en modo automático
+    return if $self->{auto_scale_y};
+    
     # ¿Cuántos píxeles se movió el ratón en el eje Y?
     my $dy = $y - $self->{drag_start_y};
     
@@ -477,14 +467,11 @@ sub _vertical_drag {
     my $price_range = $self->{manual_max_y} - $self->{manual_min_y};
     my $price_per_pixel = $price_range / $canvas_height;
     
-    # Como el eje Y está invertido (Y=0 arriba), al mover el ratón hacia abajo (dy positivo),
-    # desplazamos el rango de precios hacia arriba para que el gráfico baje.
     my $price_shift = $dy * $price_per_pixel;
     
     $self->{manual_min_y} += $price_shift;
     $self->{manual_max_y} += $price_shift;
     
-    # Actualizar ancla y repintar
     $self->{drag_start_y} = $y;
     $self->request_render();
 }
