@@ -125,12 +125,15 @@ sub render {
     # =========================================================
     my $liq_slice = $self->{indicators}->slice_array('Liquidity', $start, $end);
     $self->{liquidity_overlay}->render($scale, $liq_slice);
+    
     # ========================================================
     # NUEVO: Renderizar Overlay de Estructuras SMC
     # ========================================================
     my $smc_slice = $self->{indicators}->slice_array('SMC_Structures', $start, $end);
-    $self->{smc_overlay}->render($scale, $smc_slice);
     
+    # -> CAMBIO: $start al final de los parámetros
+    $self->{smc_overlay}->render($scale, $smc_slice, $start);
+
     # Panel Secundario (ATR)
     my $atr_width  = $self->{atr_canvas}->width;
     my $atr_height = $self->{atr_canvas}->height;

@@ -14,13 +14,14 @@ sub new {
 }
 
 sub render {
-    my ($self, $scale, $smc_slice) = @_;
+    my ($self, $scale, $smc_slice, $start_idx_viewport) = @_;
     my $c = $self->{canvas};
 
-    # Limpiar solo los dibujos correspondientes a este overlay
+    # Limpiar dibujos anteriores
     $c->delete('smc_overlay');
 
     return unless $smc_slice && @$smc_slice;
+    $start_idx_viewport //= 0;
 
     my $width  = $c->width;
     my $height = $c->height;
@@ -34,44 +35,20 @@ sub render {
 
     my $candle_width = $width / $visible_bars;
 
+    # 1. Recopilar TODOS los FVGs a dibujar 
+    # (Los históricos que venían activos + Los nuevos de este segmento)
+    my @fvgs_to_draw;
+    if (exists $smc_slice->[0]->{active_fvgs}) {
+        push @fvgs_to_draw, @{$smc_slice->[0]->{active_fvgs}};
+    }
+
     for my $i (0 .. $#$smc_slice) {
         my $punto = $smc_slice->[$i];
         next if !$punto;
 
-        # ==================================================================
-        # 1. RENDERIZAR FAIR VALUE GAPS (FVG) CON DESVANECIMIENTO PROGRESIVO
-        # ==================================================================
+        # Agregar FVGs nuevos que nacen dentro de esta pantalla
         if (exists $punto->{fvgs} && @{$punto->{fvgs}}) {
-            for my $fvg (@{$punto->{fvgs}}) {
-                my $start_idx = $fvg->{start_idx};
-                
-                # Si el bloque ya fue mitigado, se recorta hasta esa vela. 
-                # Si no, se extiende proyectado hacia la derecha.
-                my $end_idx = $fvg->{mitigated_idx} // ($scale->{offset} + $visible_bars);
-                
-                next if $end_idx < $scale->{offset}; # No dibujar si quedó muy atrás
-
-                my $x1 = ($start_idx - $offset_frac) * $candle_width + ($candle_width / 2);
-                my $x2 = ($end_idx - $offset_frac) * $candle_width + ($candle_width / 2);
-                my $y1 = $height - ((($fvg->{top} - $min_val) / $range) * $height);
-                my $y2 = $height - ((($fvg->{bottom} - $min_val) / $range) * $height);
-
-                my $color = $fvg->{type} eq 'bullish_fvg' ? '#2979FF' : '#FF5252';
-                
-                # Caja Translúcida (Usamos stipple para simular opacidad en Perl/Tk)
-                $c->createRectangle(
-                    $x1, $y1, $x2, $y2,
-                    -fill => $color, -outline => '', -stipple => 'gray25',
-                    -tags => ['smc_overlay']
-                );
-                
-                # Línea central punteada del FVG
-                $c->createLine(
-                    $x1, ($y1+$y2)/2, $x2, ($y1+$y2)/2,
-                    -dash => '-', -fill => $color, -width => 1,
-                    -tags => ['smc_overlay']
-                );
-            }
+            push @fvgs_to_draw, @{$punto->{fvgs}};
         }
 
         # ==================================================================
@@ -80,14 +57,17 @@ sub render {
         if (exists $punto->{events} && @{$punto->{events}}) {
             for my $ev (@{$punto->{events}}) {
                 my $origin_idx = $ev->{origin};
-                my $break_idx  = $i;
                 
-                my $x_start = ($origin_idx - $offset_frac) * $candle_width + ($candle_width / 2);
-                my $x_end   = ($break_idx - $offset_frac) * $candle_width + ($candle_width / 2);
+                # CORRECCIÓN: Convertir índices absolutos a relativos a la pantalla
+                my $rel_origin = $origin_idx - $start_idx_viewport;
+                my $rel_break  = $i;
+                
+                my $x_start = ($rel_origin - $offset_frac) * $candle_width + ($candle_width / 2);
+                my $x_end   = ($rel_break - $offset_frac) * $candle_width + ($candle_width / 2);
                 my $y       = $height - ((($ev->{price} - $min_val) / $range) * $height);
 
                 my $label = $ev->{type};
-                my $color = $ev->{dir} eq 'bullish' ? '#2979FF' : '#FF5252'; # Azul al alza, Rojo a la baja
+                my $color = $ev->{dir} eq 'bullish' ? '#2979FF' : '#FF5252';
 
                 $c->createLine($x_start, $y, $x_end, $y, -fill => $color, -width => 2, -tags => ['smc_overlay']);
                 $c->createText(
@@ -112,6 +92,43 @@ sub render {
                 -tags => ['smc_overlay']
             );
         }
+    }
+
+    # ==================================================================
+    # 4. RENDERIZAR FAIR VALUE GAPS (FVG) FINALMENTE
+    # ==================================================================
+    for my $fvg (@fvgs_to_draw) {
+        my $start_idx = $fvg->{start_idx};
+        
+        # Calcular límite derecho absoluto proyectado al final de la pantalla
+        my $abs_current_end = $start_idx_viewport + $offset_frac + $visible_bars;
+        my $end_idx = $fvg->{mitigated_idx} // $abs_current_end;
+        
+        # CORRECCIÓN: Convertir índices absolutos a relativos a la pantalla
+        my $rel_start = $start_idx - $start_idx_viewport;
+        my $rel_end   = $end_idx - $start_idx_viewport;
+        
+        # No dibujar si el bloque terminó por completo antes de entrar a la pantalla actual
+        next if $rel_end < $offset_frac; 
+
+        my $x1 = ($rel_start - $offset_frac) * $candle_width + ($candle_width / 2);
+        my $x2 = ($rel_end - $offset_frac) * $candle_width + ($candle_width / 2);
+        my $y1 = $height - ((($fvg->{top} - $min_val) / $range) * $height);
+        my $y2 = $height - ((($fvg->{bottom} - $min_val) / $range) * $height);
+
+        my $color = $fvg->{type} eq 'bullish_fvg' ? '#2979FF' : '#FF5252';
+        
+        $c->createRectangle(
+            $x1, $y1, $x2, $y2,
+            -fill => $color, -outline => '', -stipple => 'gray25',
+            -tags => ['smc_overlay']
+        );
+        
+        $c->createLine(
+            $x1, ($y1+$y2)/2, $x2, ($y1+$y2)/2,
+            -dash => '-', -fill => $color, -width => 1,
+            -tags => ['smc_overlay']
+        );
     }
 }
 

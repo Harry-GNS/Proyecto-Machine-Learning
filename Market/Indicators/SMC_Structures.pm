@@ -26,6 +26,7 @@ sub calculate {
             state  => 'none', # Guardará HH, HL, LH, LL
             events => [],     # Guardará BOS, CHOCH
             fvgs   => [],     # Guardará los Fair Value Gaps detectados aquí
+            active_fvgs => [],
         };
     }
 
@@ -67,6 +68,8 @@ sub calculate {
             push @remaining_fvgs, $fvg if !$mitigated;
         }
         @active_fvgs = @remaining_fvgs;
+        # Propaga los FVGs activos a la vela actual para que el Overlay pueda verlos
+        $self->{data}->[$i]->{active_fvgs} = [ @active_fvgs ];
     }
 
     # =========================================================================
