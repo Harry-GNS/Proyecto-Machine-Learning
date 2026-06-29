@@ -95,35 +95,42 @@ sub render {
     }
 
     # ==================================================================
-    # 4. RENDERIZAR FAIR VALUE GAPS (FVG) FINALMENTE
+    # 4. RENDERIZAR FAIR VALUE GAPS (FVG) ESTILO TRADINGVIEW (EXTENDIDO)
     # ==================================================================
     for my $fvg (@fvgs_to_draw) {
         my $start_idx = $fvg->{start_idx};
-        
-        # Calcular límite derecho absoluto proyectado al final de la pantalla
-        my $abs_current_end = $start_idx_viewport + $offset_frac + $visible_bars;
-        my $end_idx = $fvg->{mitigated_idx} // $abs_current_end;
-        
-        # CORRECCIÓN: Convertir índices absolutos a relativos a la pantalla
         my $rel_start = $start_idx - $start_idx_viewport;
-        my $rel_end   = $end_idx - $start_idx_viewport;
         
-        # No dibujar si el bloque terminó por completo antes de entrar a la pantalla actual
-        next if $rel_end < $offset_frac; 
-
         my $x1 = ($rel_start - $offset_frac) * $candle_width + ($candle_width / 2);
-        my $x2 = ($rel_end - $offset_frac) * $candle_width + ($candle_width / 2);
+        my $x2;
+
+        # LÓGICA DE EXTENSIÓN "EXTEND RIGHT"
+        if (defined $fvg->{mitigated_idx}) {
+            my $rel_end = $fvg->{mitigated_idx} - $start_idx_viewport;
+            
+            # No dibujar si el bloque ya fue superado y quedó en el pasado oculto
+            next if $rel_end < $offset_frac; 
+            
+            $x2 = ($rel_end - $offset_frac) * $candle_width + ($candle_width / 2);
+        } else {
+            # Si NO está mitigado, se proyecta "infinitamente" hacia el futuro 
+            # (sobrepasamos el margen derecho de la pantalla con un valor muy alto)
+            $x2 = $width + 2000; 
+        }
+
         my $y1 = $height - ((($fvg->{top} - $min_val) / $range) * $height);
         my $y2 = $height - ((($fvg->{bottom} - $min_val) / $range) * $height);
 
         my $color = $fvg->{type} eq 'bullish_fvg' ? '#2979FF' : '#FF5252';
         
+        # Caja Translúcida (agregamos '-outline => $color' para darle el borde definido de TV)
         $c->createRectangle(
             $x1, $y1, $x2, $y2,
-            -fill => $color, -outline => '', -stipple => 'gray25',
+            -fill => $color, -outline => $color, -stipple => 'gray25',
             -tags => ['smc_overlay']
         );
         
+        # Línea central punteada del FVG (también extendida)
         $c->createLine(
             $x1, ($y1+$y2)/2, $x2, ($y1+$y2)/2,
             -dash => '-', -fill => $color, -width => 1,

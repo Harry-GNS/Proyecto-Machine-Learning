@@ -58,10 +58,10 @@ sub render {
             if ($punto->{state} eq 'swing_high') {
                 $c->createLine(
                     $x_start, $y, $x_end, $y,
-                    -dash => '.', -fill => '#FF5252', -width => 1.5, # Rojo
+                    -dash => '.', -fill => '#FF5252', -width => 1.5,
                     -tags => ['liquidity_overlay']
                 );
-                if ($punto->{resolution} eq 'active') {
+                if (defined $punto->{resolution} && $punto->{resolution} eq 'active') {
                     $c->createText($x_end - 5, $y - 10, -text => 'BSL', -fill => '#FF5252', -anchor => 'e', -font => 'Helvetica 8 bold', -tags => ['liquidity_overlay']);
                 }
             } 
@@ -69,10 +69,10 @@ sub render {
             elsif ($punto->{state} eq 'swing_low') {
                 $c->createLine(
                     $x_start, $y, $x_end, $y,
-                    -dash => '.', -fill => '#00E676', -width => 1.5, # Verde[cite: 3]
+                    -dash => '.', -fill => '#00E676', -width => 1.5,
                     -tags => ['liquidity_overlay']
                 );
-                if ($punto->{resolution} eq 'active') {
+                if (defined $punto->{resolution} && $punto->{resolution} eq 'active') {
                     $c->createText($x_end - 5, $y + 10, -text => 'SSL', -fill => '#00E676', -anchor => 'e', -font => 'Helvetica 8 bold', -tags => ['liquidity_overlay']);
                 }
             }
@@ -80,10 +80,10 @@ sub render {
             elsif ($punto->{state} eq 'eqh') {
                 $c->createLine(
                     $x_start, $y, $x_end, $y,
-                    -fill => $self->{color_eqh}, -width => 2.0, # Configurable[cite: 3]
+                    -fill => $self->{color_eqh}, -width => 2.0,
                     -tags => ['liquidity_overlay']
                 );
-                if ($punto->{resolution} eq 'active') {
+                if (defined $punto->{resolution} && $punto->{resolution} eq 'active') {
                     $c->createText($x_end - 5, $y - 10, -text => 'EQH', -fill => $self->{color_eqh}, -anchor => 'e', -font => 'Helvetica 8 bold', -tags => ['liquidity_overlay']);
                 }
             }
@@ -91,10 +91,10 @@ sub render {
             elsif ($punto->{state} eq 'eql') {
                 $c->createLine(
                     $x_start, $y, $x_end, $y,
-                    -fill => $self->{color_eql}, -width => 2.0, # Configurable[cite: 3]
+                    -fill => $self->{color_eql}, -width => 2.0,
                     -tags => ['liquidity_overlay']
                 );
-                if ($punto->{resolution} eq 'active') {
+                if (defined $punto->{resolution} && $punto->{resolution} eq 'active') {
                     $c->createText($x_end - 5, $y + 10, -text => 'EQL', -fill => $self->{color_eql}, -anchor => 'e', -font => 'Helvetica 8 bold', -tags => ['liquidity_overlay']);
                 }
             }
