@@ -199,16 +199,20 @@ sub draw_crosshair {
         $c->itemconfigure($self->{crosshair}->{x_bg}, -state => 'hidden');
     }
 
-    # Eje Y
+# Eje Y
     if (defined $y) {
         my $raw_val  = $s->y_to_value($y);
-        my $val      = int($raw_val / 0.25 + 0.5) * 0.25;
+        
+        # Redondeo exacto al 0.25 más cercano
+        my $val = int(($raw_val / 0.25) + 0.5) * 0.25;
         my $snapped_y = $s->value_to_y($val);
 
         $c->coords($self->{crosshair}->{hline}, 0, $snapped_y, $width, $snapped_y);
         $c->itemconfigure($self->{crosshair}->{hline}, -state => 'normal');
 
+        # Formateo estricto a 2 decimales
         my $display_val = sprintf("%.2f", $val);
+        
         $c->coords($self->{crosshair}->{y_text}, $width - 5, $snapped_y);
         $c->itemconfigure($self->{crosshair}->{y_text}, -text => $display_val, -state => 'normal');
 
