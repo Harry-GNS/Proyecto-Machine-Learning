@@ -2,7 +2,7 @@
 
 use strict;
 use warnings;
-use lib '/home/davidandresvm/Documentos/Proyecto_IB_G';
+use lib '/home/davidandresvm/Documentos/ProyectoMLv2';
 
 
 use FindBin;
