@@ -43,6 +43,7 @@ sub new {
         manual_min_atr  => 0,
         manual_max_atr  => 0,
         drag_start_atr  => 0,
+        show_smc        => 1,
     };
     bless $self, $class;
 
@@ -127,13 +128,16 @@ sub render {
     $self->{liquidity_overlay}->render($scale, $liq_slice);
     
     # ========================================================
-    # NUEVO: Renderizar Overlay de Estructuras SMC
+    # RENDIMIENTO Y RENDERIZADO DEL OVERLAY DE ESTRUCTURAS SMC
     # ========================================================
-    my $smc_slice = $self->{indicators}->slice_array('SMC_Structures', $start, $end);
+    if ($self->{show_smc}) {
+        my $smc_slice = $self->{indicators}->slice_array('SMC_Structures', $start, $end);
+        $self->{smc_overlay}->render($scale, $smc_slice, $start);
+    } else {
+        # Si está desactivado, borra de inmediato el overlay de la pantalla
+        $self->{price_canvas}->delete('smc_overlay');
+    }
     
-    # -> CAMBIO: $start al final de los parámetros
-    $self->{smc_overlay}->render($scale, $smc_slice, $start);
-
     # Panel Secundario (ATR)
     my $atr_width  = $self->{atr_canvas}->width;
     my $atr_height = $self->{atr_canvas}->height;
@@ -866,6 +870,14 @@ sub _replay_loop {
     $self->{replay_timer} = $self->{mw}->after($self->{replay_speed}, sub {
         $self->_replay_loop();
     });
+}
+sub toggle_smc {
+    my ($self) = @_;
+    # Alterna entre 1 y 0
+    $self->{show_smc} = $self->{show_smc} ? 0 : 1;
+    # Solicita redibujar el canvas con el cambio de estado
+    $self->request_render();
+    return $self->{show_smc};
 }
 
 1;

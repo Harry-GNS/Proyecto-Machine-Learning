@@ -96,6 +96,21 @@ $toolbar->Button(
     -bg => '#2A2E39', -fg => '#d1d4dc', -relief => 'flat'
 )->pack(-side => 'left', -padx => 5);
 
+# ==============================================================================
+# NUEVO: Bloque de Visibilidad de Capas Analíticas (SMC)
+# ==============================================================================
+$toolbar->Label(-text => '|', -bg => '#131722', -fg => '#363c4e')->pack(-side => 'left', -padx => 5);
+
+my $smc_texto = "SMC: VISIBLE";
+$toolbar->Button(
+    -textvariable => \$smc_texto, 
+    -command => sub { 
+        my $visible = $engine->toggle_smc();
+        $smc_texto = $visible ? "SMC: VISIBLE" : "SMC: OCULTO";
+    },
+    -bg => '#2A2E39', -fg => '#d1d4dc', -activebackground => '#2962FF', -relief => 'flat', -font => 'Helvetica 9 bold'
+)->pack(-side => 'left', -padx => 5);
+
 # Creación de los Canvases (Paneles Visuales)
 my $price_canvas = $mw->Canvas(-bg => '#131722', -height => 600)->pack(-fill => 'both', -expand => 1);
 my $atr_canvas   = $mw->Canvas(-bg => '#131722', -height => 200)->pack(-fill => 'x');
