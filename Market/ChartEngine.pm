@@ -371,26 +371,42 @@ sub _on_mouse_move {
 sub _on_drag_start {
     my ($self, $x, $y, $width) = @_;
     
-    # Asignamos el área sensible de la escala a los últimos 70 píxeles derechos
+    # =========================================================
+    # NUEVO: INTERCEPTOR DE SELECCIÓN DE VELA (MODO REPLAY)
+    # =========================================================
+    if ($self->{awaiting_replay_selection}) {
+        # Calcular el ancho de cada vela en píxeles
+        my $candle_width = $width / $self->{visible_bars};
+        
+        # Calcular el índice exacto sumando el offset izquierdo más las velas desplazadas
+        my $clicked_idx = int($self->{offset}) + int($x / $candle_width);
+        
+        # Proteger los límites (evitar clics fuera de rango)
+        my $max_idx = $self->{market_data}->size() - 1;
+        $clicked_idx = 0 if $clicked_idx < 0;
+        $clicked_idx = $max_idx if $clicked_idx > $max_idx;
+        
+        # Iniciar el replay exactamente en esa vela
+        $self->start_replay($clicked_idx);
+        return; # Abortar el resto de la función para que no inicie un arrastre
+    }
+
+    # =========================================================
+    # Resto del código original de _on_drag_start...
+    # =========================================================
     my $escala_sensible = 70;
     
-    # ¿Hizo clic en la escala de precios? (Tiene que existir $width, $y, y estar a la derecha)
     if (defined $width && defined $y && $x > ($width - $escala_sensible)) {
-        
         $self->{drag_mode} = 'vertical';
         $self->{drag_start_y} = $y;
         
-        # Congelar la escala automática (Modo Manual) para permitir el estiramiento
         if ($self->{auto_scale_y}) {
             my ($start, $end) = $self->compute_window();
             my $slice = $self->{market_data}->get_slice($start, $end);
             ($self->{manual_min_y}, $self->{manual_max_y}) = $self->{price_panel}->get_y_range($slice);
             $self->{auto_scale_y} = 0; 
         }
-        
     } else {
-        
-        # Clic normal en la gráfica: Modo Paneo en el Tiempo
         $self->{drag_mode} = 'horizontal';
         $self->{drag_start_x} = $x;
         $self->{drag_start_offset} = $self->{offset};
@@ -739,5 +755,99 @@ sub _clamp_offset {
     $self->{offset} = $upper_bound if $self->{offset} > $upper_bound;
 }
 
+# ==============================================================================
+# SISTEMA REPLAY: Motor de Eventos y Callbacks
+# ==============================================================================
+
+sub enable_replay_selection {
+    my ($self) = @_;
+    # Activar la bandera de espera
+    $self->{awaiting_replay_selection} = 1;
+    # Feedback visual: Cambiamos el cursor del ratón a una cruz
+    $self->{price_canvas}->configure(-cursor => 'crosshair');
+    print "Modo Replay Seleccion: Haz clic sobre la vela donde deseas iniciar el corte.\n";
+}
+
+sub start_replay {
+    my ($self, $index) = @_;
+    
+    # Limpiar el estado de espera y devolver el cursor a la normalidad
+    $self->{awaiting_replay_selection} = 0;
+    $self->{price_canvas}->configure(-cursor => 'arrow');
+
+    # Enviar el índice exacto clickeado al backend de datos
+    $self->{market_data}->start_replay($index);
+    
+    # Recalcular indicadores hasta el corte
+    $self->{indicators}->reset_all();
+    $self->{indicators}->recalculate_all($self->{market_data});
+    
+    $self->reset_view();
+}
+
+sub stop_replay {
+    my ($self) = @_;
+    $self->pause_replay();
+    $self->{market_data}->stop_replay();
+    
+    # Al salir, recalculamos todos los indicadores con la data entera
+    $self->{indicators}->reset_all();
+    $self->{indicators}->recalculate_all($self->{market_data});
+    
+    $self->reset_view();
+}
+
+sub step_replay {
+    my ($self, $steps) = @_;
+    return unless $self->{market_data}->{replay_mode};
+
+    $self->{market_data}->step_replay($steps);
+    
+    # Los indicadores y overlays se recalcularán dinámicamente hasta la última vela visible
+    $self->{indicators}->reset_all();
+    $self->{indicators}->recalculate_all($self->{market_data});
+    
+    # Auto-Desplazamiento (Auto-Scroll) si el precio en replay llega al borde de la pantalla
+    my $current_last = $self->{market_data}->size() - 1;
+    my $visible_end = $self->{offset} + $self->{visible_bars};
+    
+    if ($current_last >= $visible_end - 5) {
+        $self->{offset} += $steps;
+        $self->_clamp_offset();
+    }
+    
+    $self->request_render();
+}
+
+sub play_replay {
+    my ($self) = @_;
+    return if $self->{replay_timer};
+    $self->{replay_speed} = 1000; # Velocidad Normal: 1 segundo por vela
+    $self->_replay_loop();
+}
+
+sub fast_forward_replay {
+    my ($self) = @_;
+    $self->{replay_speed} = 150; # Velocidad Rápida: 150 milisegundos por vela
+    $self->_replay_loop() unless $self->{replay_timer};
+}
+
+sub pause_replay {
+    my ($self) = @_;
+    if ($self->{replay_timer}) {
+        $self->{replay_timer}->cancel;
+        $self->{replay_timer} = undef;
+    }
+}
+
+sub _replay_loop {
+    my ($self) = @_;
+    $self->step_replay(1);
+    
+    # Creamos un bucle asíncrono utilizando el planificador de eventos after() de Perl/Tk
+    $self->{replay_timer} = $self->{mw}->after($self->{replay_speed}, sub {
+        $self->_replay_loop();
+    });
+}
 
 1;

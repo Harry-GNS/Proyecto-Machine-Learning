@@ -7,8 +7,11 @@ use POSIX qw(floor);
 sub new {
     my ($class) = @_;
     my $self = {
-        data       => {},
-        current_tf => '1m',
+        data         => {},
+        current_tf   => '1m',
+        # Variables nativas para el Sistema Replay
+        replay_mode  => 0,
+        replay_index => 0,
     };
     bless $self, $class;
     return $self;
@@ -19,43 +22,38 @@ sub add_candle {
     push @{ $self->{data}->{'1m'} }, $candle;
 }
 
-# ================================================================
-# build_tf_candles — agrupación por tiempo real (NO por índice)
-#
-# Para cada vela de 1m se calcula su "bucket" temporal:
-#   bucket = floor(minuto_del_día / N) * N
-# donde minuto_del_día = hora*60 + minuto
-# y N es el número de minutos de la temporalidad objetivo.
-#
-# Esto garantiza que, por ejemplo en 5m:
-#   00:00–00:04 → bucket 0  (vela 00:00)
-#   00:05–00:09 → bucket 5  (vela 00:05)
-#   etc.
-# y que el bucket 0 de cada día siempre coincide con la primera
-# vela real de ese día (pivote), eliminando el desfase.
-# ================================================================
 sub build_tf_candles {
     my ($self, $target_tf) = @_;
 
-    my ($n) = $target_tf =~ /(\d+)/;
+    # Parsear dinámicamente minutos, horas, días o semanas
+    my $n;
+    if ($target_tf =~ /^(\d+)m$/) {
+        $n = $1;
+    } elsif ($target_tf =~ /^(\d+)h$/) {
+        $n = $1 * 60;
+    } elsif ($target_tf eq 'D') {
+        $n = 1440;
+    } elsif ($target_tf eq 'W') {
+        $n = 10080;
+    }
+    
     return unless $n && $n > 0;
     return unless exists $self->{data}->{'1m'} && @{ $self->{data}->{'1m'} } > 0;
 
     my $base_data = $self->{data}->{'1m'};
     my @aggregated;
-    my %bucket_map;   # "YYYY-MM-DD:bucket" → índice en @aggregated
+    my %bucket_map;
 
     for my $candle (@$base_data) {
         my $ts = $candle->{timestamp};
 
-        # Extraer fecha y hora del timestamp (soporta offset timezone)
         my ($date, $hour, $min);
         if ($ts =~ /(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/) {
             $date = $1;
             $hour = $2 + 0;
             $min  = $3 + 0;
         } else {
-            next;  # timestamp no reconocido
+            next; 
         }
 
         my $day_minute = $hour * 60 + $min;
@@ -63,14 +61,10 @@ sub build_tf_candles {
         my $key        = "$date:$bucket";
 
         if (!exists $bucket_map{$key}) {
-            # Primera vela del bucket → inicializar
             my $bucket_hour = floor($bucket / 60);
             my $bucket_min  = $bucket % 60;
             my $bucket_ts   = sprintf("%sT%02d:%02d:00", $date, $bucket_hour, $bucket_min);
-            # Preservar offset de zona horaria si existe
-            if ($ts =~ /([-+]\d{2}:\d{2})$/) {
-                $bucket_ts .= $1;
-            }
+            if ($ts =~ /([-+]\d{2}:\d{2})$/) { $bucket_ts .= $1; }
 
             push @aggregated, {
                 timestamp => $bucket_ts,
@@ -82,7 +76,6 @@ sub build_tf_candles {
             };
             $bucket_map{$key} = $#aggregated;
         } else {
-            # Vela adicional en el mismo bucket → actualizar
             my $idx = $bucket_map{$key};
             $aggregated[$idx]->{high}   = $candle->{high}   if $candle->{high}   > $aggregated[$idx]->{high};
             $aggregated[$idx]->{low}    = $candle->{low}    if $candle->{low}    < $aggregated[$idx]->{low};
@@ -96,8 +89,10 @@ sub build_tf_candles {
 
 sub build_timeframes {
     my ($self) = @_;
-    $self->build_tf_candles('5m');
-    $self->build_tf_candles('15m');
+    # Generar todas las temporalidades soportadas exigidas
+    foreach my $tf (qw(5m 15m 1h 2h 4h D W)) {
+        $self->build_tf_candles($tf);
+    }
     $self->set_timeframe('1m');
 }
 
@@ -115,24 +110,55 @@ sub _active_array {
     return $self->{data}->{ $self->{current_tf} };
 }
 
-sub get_slice {
-    my ($self, $start, $end) = @_;
+# =====================================================================
+# SISTEMA REPLAY: Filtrado Estricto de Datos
+# =====================================================================
+sub start_replay {
+    my ($self, $index) = @_;
+    $self->{replay_mode} = 1;
+    $self->{replay_index} = $index // 0;
+}
+
+sub stop_replay {
+    my ($self) = @_;
+    $self->{replay_mode} = 0;
+}
+
+sub step_replay {
+    my ($self, $steps) = @_;
+    return unless $self->{replay_mode};
     my $array_ref = $self->_active_array();
-    $start = 0                  if $start < 0;
-    $end   = $#{$array_ref}     if $end > $#{$array_ref};
-    return [ @{$array_ref}[$start .. $end] ];
+    $self->{replay_index} += $steps;
+    $self->{replay_index} = $#{$array_ref} if $self->{replay_index} > $#{$array_ref};
+    $self->{replay_index} = 0 if $self->{replay_index} < 0;
 }
 
 sub size {
     my ($self) = @_;
     my $array_ref = $self->_active_array();
-    return scalar @{$array_ref};
+    # Si estamos en replay, el sistema cree que la data termina en replay_index
+    return $self->{replay_mode} ? $self->{replay_index} + 1 : scalar @{$array_ref};
+}
+
+sub get_slice {
+    my ($self, $start, $end) = @_;
+    my $array_ref = $self->_active_array();
+    
+    # Restricción de filtrado
+    my $max_limit = $self->{replay_mode} ? $self->{replay_index} : $#{$array_ref};
+    
+    $start = 0 if $start < 0;
+    $end = $max_limit if $end > $max_limit;
+    
+    return [] if $start > $end;
+    return [ @{$array_ref}[$start .. $end] ];
 }
 
 sub last_candle {
     my ($self) = @_;
     my $array_ref = $self->_active_array();
-    return $array_ref->[-1] if @{$array_ref};
+    my $idx = $self->{replay_mode} ? $self->{replay_index} : $#{$array_ref};
+    return $array_ref->[$idx] if @{$array_ref} && $idx >= 0;
     return undef;
 }
 
@@ -147,13 +173,15 @@ sub last_index {
     my ($self) = @_;
     my $array_ref = $self->_active_array();
     return undef unless $array_ref && @$array_ref;
-    return $#{$array_ref};
+    return $self->{replay_mode} ? $self->{replay_index} : $#{$array_ref};
 }
 
 sub get_candle {
     my ($self, $index) = @_;
     my $array_ref = $self->_active_array();
     return undef if !defined $index || $index < 0 || $index > $#{$array_ref};
+    # Seguridad adicional para Replay
+    return undef if $self->{replay_mode} && $index > $self->{replay_index};
     return $array_ref->[$index];
 }
 

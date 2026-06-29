@@ -30,48 +30,70 @@ $mw->attributes('-zoomed' => 1);
 my $engine; 
 
 # ==============================================================================
-# NUEVO: Barra de Herramientas Superior
+# NUEVO: Barra de Herramientas Estilo TradingView (Timeframes y Replay)
 # ==============================================================================
 my $toolbar = $mw->Frame(-bg => '#131722')->pack(-fill => 'x', -side => 'top');
 
+# 1. Bloque de Temporalidades
+my $tf_frame = $toolbar->Frame(-bg => '#131722')->pack(-side => 'left', -padx => 10, -pady => 5);
+my @timeframes = ('1m', '5m', '15m', '1h', '2h', '4h', 'D', 'W');
+foreach my $tf (@timeframes) {
+    $tf_frame->Button(
+        -text => $tf, 
+        -command => sub { $engine->set_timeframe($tf) },
+        -bg => '#2A2E39', -fg => '#d1d4dc', -activebackground => '#2962FF', -relief => 'flat', -font => 'Helvetica 9'
+    )->pack(-side => 'left', -padx => 1);
+}
 
-# Crear botones para cambiar la temporalidad
-$toolbar->Button(
-    -text => '1 Minuto', 
-    -command => sub { $engine->set_timeframe('1m') }
-)->pack(-side => 'left', -padx => 5, -pady => 5);
+# Separador Visual
+$toolbar->Label(-text => '|', -bg => '#131722', -fg => '#363c4e')->pack(-side => 'left', -padx => 5);
 
-$toolbar->Button(
-    -text => '5 Minutos', 
-    -command => sub { $engine->set_timeframe('5m') }
-)->pack(-side => 'left', -padx => 5, -pady => 5);
+# 2. Bloque Controles del Sistema Replay 
+my $replay_frame = $toolbar->Frame(-bg => '#131722')->pack(-side => 'left', -padx => 5);
 
-$toolbar->Button(
-    -text => '15 Minutos', 
-    -command => sub { $engine->set_timeframe('15m') }
-)->pack(-side => 'left', -padx => 5, -pady => 5);
+$replay_frame->Button(-text => '✂ Inicio Replay', -command => sub { $engine->enable_replay_selection() }, 
+    -bg => '#2962FF', -fg => 'white', -relief => 'flat', -font => 'Helvetica 9 bold')->pack(-side => 'left', -padx => 2);
 
-# ==============================================================================
-# NUEVO: Botones de Reset y Modo (Auto/Manual)
-# ==============================================================================
-# Variable para que el texto del botón cambie dinámicamente
+$replay_frame->Button(-text => '⏮ Step Back', -command => sub { $engine->step_replay(-1) }, 
+    -bg => '#2A2E39', -fg => '#d1d4dc', -relief => 'flat')->pack(-side => 'left', -padx => 2);
+
+$replay_frame->Button(-text => '▶ Play', -command => sub { $engine->play_replay() }, 
+    -bg => '#2A2E39', -fg => '#d1d4dc', -relief => 'flat')->pack(-side => 'left', -padx => 2);
+
+$replay_frame->Button(-text => '⏸ Pause', -command => sub { $engine->pause_replay() }, 
+    -bg => '#2A2E39', -fg => '#d1d4dc', -relief => 'flat')->pack(-side => 'left', -padx => 2);
+
+$replay_frame->Button(-text => '⏭ Step Fwd', -command => sub { $engine->step_replay(1) }, 
+    -bg => '#2A2E39', -fg => '#d1d4dc', -relief => 'flat')->pack(-side => 'left', -padx => 2);
+
+$replay_frame->Button(-text => '⏩ Fast Fwd', -command => sub { $engine->fast_forward_replay() }, 
+    -bg => '#2A2E39', -fg => '#d1d4dc', -relief => 'flat')->pack(-side => 'left', -padx => 2);
+
+$replay_frame->Button(-text => '✖ Exit Replay', -command => sub { $engine->stop_replay() }, 
+    -bg => '#F23645', -fg => 'white', -relief => 'flat', -font => 'Helvetica 9')->pack(-side => 'left', -padx => 10);
+
+# Separador Visual
+$toolbar->Label(-text => '|', -bg => '#131722', -fg => '#363c4e')->pack(-side => 'left', -padx => 5);
+
+# 3. Bloque Herramientas de Escala
 my $modo_texto = "Modo: Automatico";
-
 $toolbar->Button(
     -textvariable => \$modo_texto, 
     -command => sub { 
         my $es_auto = $engine->toggle_auto_scale();
         $modo_texto = $es_auto ? "Modo: Automatico" : "Modo: Manual";
-    }
-)->pack(-side => 'left', -padx => 20, -pady => 5);
+    },
+    -bg => '#2A2E39', -fg => '#d1d4dc', -relief => 'flat'
+)->pack(-side => 'left', -padx => 5);
 
 $toolbar->Button(
     -text => 'Reset', 
     -command => sub { 
         $engine->reset_view(); 
-        $modo_texto = "Modo: Automatico"; # Al resetear, siempre vuelve a automático
-    }
-)->pack(-side => 'left', -padx => 5, -pady => 5);
+        $modo_texto = "Modo: Automatico"; 
+    },
+    -bg => '#2A2E39', -fg => '#d1d4dc', -relief => 'flat'
+)->pack(-side => 'left', -padx => 5);
 
 # Creación de los Canvases (Paneles Visuales)
 my $price_canvas = $mw->Canvas(-bg => '#131722', -height => 600)->pack(-fill => 'both', -expand => 1);
