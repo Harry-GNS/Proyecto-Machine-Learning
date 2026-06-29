@@ -90,37 +90,59 @@ sub _draw_y_scale {
     
     $canvas->delete('y_scale');
     
-    # Calculamos dónde termina el área de las velas y empieza la barra
-    my $chart_end_x = $self->{width} - RIGHT_MARGIN;
+    # Constante manual para evitar el uso del módulo externo si falla
+    my $right_margin = 70;
+    my $chart_end_x = $self->{width} - $right_margin;
     
-    # 1. DIBUJAR FONDO SÓLIDO Y BORDE SEPARADOR
     $canvas->createRectangle(
         $chart_end_x, 0, 
         $self->{width}, $self->{height},
-        -fill    => '#131722',  # Color oscuro de fondo para la barra
-        -outline => '#2a2e39',  # Línea vertical separadora entre la gráfica y la barra
+        -fill    => '#131722',
+        -outline => '#2a2e39',
         -tags    => 'y_scale'
     );
     
-    # 2. DIBUJAR LOS TEXTOS (CON DOS DECIMALES)
-    my $num_labels = 10;
     my $range = $self->{max_val} - $self->{min_val};
-    $range = 1 if $range == 0; # Protección contra división por cero
+    return if $range <= 0;
     
-    my $step = $range / $num_labels;
+    # =========================================================
+    # LÓGICA INTELIGENTE DE ESCALAS (Precios vs ATR)
+    # =========================================================
+    my $step;
     
-    for my $i (0 .. $num_labels) {
-        my $val = $self->{min_val} + ($i * $step);
+    if ($self->{max_val} > 1000) {
+        # Es el panel principal de Precios (Valores 27000+) -> Salto estricto de 25
+        $step = 25;
+    } else {
+        # Es el panel ATR (Valores pequeños 3.0 - 6.0) -> Salto dinámico
+        $step = $range / 4; 
+    }
+    
+    # Encontrar el múltiplo más alto (el "techo") para dibujar de arriba hacia abajo restando
+    my $start_val = int($self->{max_val} / $step) * $step;
+    
+    # Bucle invertido: Iteramos desde el precio más alto hacia el más bajo (restando)
+    for (my $val = $start_val; $val >= $self->{min_val}; $val -= $step) {
+        
         my $y_pos = $self->value_to_y($val);
         
+        # Formateo estricto a 2 decimales (.00)
         my $display_val = sprintf("%.2f", $val);
+        
+        $canvas->createLine(
+            $chart_end_x, $y_pos, 
+            $chart_end_x + 5, $y_pos,
+            -fill => '#4a4f66',
+            -tags => 'y_scale'
+        );
         
         $canvas->createText(
             $self->{width} - 5, $y_pos, 
-            -text => $display_val, 
+            -text   => $display_val, 
             -anchor => 'e', 
-            -fill => '#d1d4dc', 
-            -tags => 'y_scale' 
+            -fill   => '#d1d4dc', 
+            -font   => ['Helvetica', 9],
+            -tags   => 'y_scale' 
         );
     }
 }
