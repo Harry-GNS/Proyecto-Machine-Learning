@@ -2,7 +2,8 @@ package Market::ChartEngine;
 
 use strict;
 use warnings;
-use lib '/home/davidandresvm/Documentos/ProyectoMLv2'; # <-- Añade esta línea
+use utf8;
+use lib '/home/davidandresvm/Documentos/ProyectoMLv2';
 
 use Market::Panels::Scales;
 use Market::Panels::PricePanel;
@@ -45,6 +46,21 @@ sub new {
         manual_max_atr  => 0,
         drag_start_atr  => 0,
         show_smc        => 1,
+
+        # Hash de visibilidad granular de overlays
+        # Cada clave controla una capa de dibujo independiente.
+        # 1 = visible, 0 = oculto. El overlay comprueba la clave antes de dibujar.
+        visibility => {
+            zigzag           => 1,  # ZigZag (LonesomeTheBlue)
+            bos_choch        => 1,  # Rupturas de Estructura (BOS / CHOCH)
+            structure_labels => 1,  # Etiquetas HH / HL / LH / LL
+            fvg              => 1,  # Fair Value Gaps
+            bsl              => 1,  # Buy-Side Liquidity
+            ssl              => 1,  # Sell-Side Liquidity
+            eqh_eql          => 1,  # Equal Highs / Equal Lows
+            liq_events       => 1,  # Sweeps, Grabs, Runs
+        },
+        _sidebar_buttons => {},     # refs a widgets de botón para actualizar su estado
     };
     bless $self, $class;
 
@@ -54,11 +70,11 @@ sub new {
     $self->{price_panel} = Market::Panels::PricePanel->new(canvas => $self->{price_canvas});
     $self->{atr_panel}   = Market::Panels::ATRPanel->new(canvas => $self->{atr_canvas});
 
-    # NUEVO: Inicializar el Overlay de Liquidez
     $self->{liquidity_overlay} = Market::Overlays::Liquidity->new(canvas => $self->{price_canvas});
-    $self->{smc_overlay} = Market::Overlays::SMC_Structures->new(canvas => $self->{price_canvas});
-    $self->{zigzag_overlay} = Market::Overlays::ZigZag_Trend->new(canvas => $self->{price_canvas});
+    $self->{smc_overlay}       = Market::Overlays::SMC_Structures->new(canvas => $self->{price_canvas});
+    $self->{zigzag_overlay}    = Market::Overlays::ZigZag_Trend->new(canvas => $self->{price_canvas});
     $self->bind_events();
+    $self->_build_sidebar($args{sidebar}) if defined $args{sidebar};
     return $self;
 }
 
@@ -123,28 +139,32 @@ sub render {
 
     $self->{price_panel}->set_scale($scale);
     $self->{price_panel}->render($data_slice);
+
+    my $vis = $self->{visibility};
+
     # =========================================================
-    # NUEVO: Renderizar Overlay de Liquidez
+    # Overlay de Liquidez (BSL / SSL / EQH / EQL / Sweeps)
     # =========================================================
     my $liq_slice = $self->{indicators}->slice_array('Liquidity', $start, $end);
-    $self->{liquidity_overlay}->render($scale, $liq_slice);
-    
+    $self->{liquidity_overlay}->render($scale, $liq_slice, $vis);
+
     # ========================================================
-    # RENDIMIENTO Y RENDERIZADO DEL OVERLAY DE ESTRUCTURAS SMC
+    # Overlay de Estructuras SMC (BOS / CHOCH / FVG / labels)
+    # El flag show_smc actúa como master-switch; los flags
+    # individuales dentro de visibility dan control granular.
     # ========================================================
     if ($self->{show_smc}) {
         my $smc_slice = $self->{indicators}->slice_array('SMC_Structures', $start, $end);
-        $self->{smc_overlay}->render($scale, $smc_slice, $start);
+        $self->{smc_overlay}->render($scale, $smc_slice, $start, $vis);
     } else {
-        # Si está desactivado, borra de inmediato el overlay de la pantalla
         $self->{price_canvas}->delete('smc_overlay');
     }
 
     # ========================================================
-    # RENDERIZADO DEL OVERLAY ZIGZAG (ChartPrime port)
+    # Overlay ZigZag (LonesomeTheBlue port)
     # ========================================================
     my $zz_slice = $self->{indicators}->slice_array('ZigZag_Trend', $start, $end);
-    $self->{zigzag_overlay}->render($scale, $zz_slice, $start);
+    $self->{zigzag_overlay}->render($scale, $zz_slice, $start, $vis);
 
     # Panel Secundario (ATR)
     my $atr_width  = $self->{atr_canvas}->width;
@@ -881,11 +901,140 @@ sub _replay_loop {
 }
 sub toggle_smc {
     my ($self) = @_;
-    # Alterna entre 1 y 0
     $self->{show_smc} = $self->{show_smc} ? 0 : 1;
-    # Solicita redibujar el canvas con el cambio de estado
+    # Sincronizar con los flags individuales de SMC en visibility
+    for my $key (qw(bos_choch structure_labels fvg)) {
+        $self->{visibility}{$key} = $self->{show_smc};
+        if (my $btn = $self->{_sidebar_buttons}{$key}) {
+            $self->_update_button_state($btn, $self->{show_smc});
+        }
+    }
     $self->request_render();
     return $self->{show_smc};
+}
+
+# =============================================================================
+# SISTEMA DE VISIBILIDAD GRANULAR
+# =============================================================================
+
+# toggle_visibility($key): conmuta un flag individual y redibuja.
+# Actualiza el color del botón de la barra lateral si existe.
+sub toggle_visibility {
+    my ($self, $key) = @_;
+    my $new_val = $self->{visibility}{$key} ? 0 : 1;
+    $self->{visibility}{$key} = $new_val;
+    if (my $btn = $self->{_sidebar_buttons}{$key}) {
+        $self->_update_button_state($btn, $new_val);
+    }
+    $self->request_render();
+    return $new_val;
+}
+
+# _update_button_state: actualiza el color del botón según su estado on/off.
+sub _update_button_state {
+    my ($self, $btn, $is_on) = @_;
+    if ($is_on) {
+        $btn->configure(-bg => '#2962FF', -fg => '#FFFFFF',
+                        -activebackground => '#1E4FD8');
+    } else {
+        $btn->configure(-bg => '#2A2E39', -fg => '#6B7280',
+                        -activebackground => '#383D4A');
+    }
+}
+
+# =============================================================================
+# BARRA LATERAL DE CONTROLES (estilo VS Code)
+# =============================================================================
+# Recibe un Frame de Tk ya creado en market.pl y lo popula con botones toggle.
+# Cada sección agrupa controles relacionados con una etiqueta separadora.
+sub _build_sidebar {
+    my ($self, $sidebar) = @_;
+    return unless defined $sidebar;
+
+    my $bg_panel  = '#1A1E2E';   # fondo del panel
+    my $bg_on     = '#2962FF';   # botón activo  (azul TradingView)
+    my $bg_off    = '#2A2E39';   # botón inactivo
+    my $fg_on     = '#FFFFFF';
+    my $fg_off    = '#6B7280';
+    my $fg_label  = '#4B5563';
+    my $btn_font  = 'Helvetica 9';
+    my $lbl_font  = 'Helvetica 8';
+
+    $sidebar->configure(-bg => $bg_panel);
+
+    # --- Cierre de sección ---
+    my $sep = sub {
+        my ($text) = @_;
+        $sidebar->Label(
+            -text => $text, -bg => $bg_panel, -fg => $fg_label,
+            -font => $lbl_font, -anchor => 'w',
+        )->pack(-fill => 'x', -padx => 6, -pady => [10, 2]);
+        $sidebar->Frame(-bg => '#2D3245', -height => 1)
+            ->pack(-fill => 'x', -padx => 4, -pady => [0, 4]);
+    };
+
+    # --- Botón toggle reutilizable ---
+    my $make_toggle = sub {
+        my ($key, $label) = @_;
+        my $is_on = $self->{visibility}{$key} // 1;
+        my $btn;
+        $btn = $sidebar->Button(
+            -text             => $label,
+            -bg               => $is_on ? $bg_on : $bg_off,
+            -fg               => $is_on ? $fg_on : $fg_off,
+            -activebackground => $is_on ? '#1E4FD8' : '#383D4A',
+            -activeforeground => '#FFFFFF',
+            -relief           => 'flat',
+            -anchor           => 'w',
+            -font             => $btn_font,
+            -padx             => 8,
+            -pady             => 4,
+            -cursor           => 'hand2',
+            -command          => sub { $self->toggle_visibility($key) },
+        );
+        $btn->pack(-fill => 'x', -padx => 4, -pady => 1);
+        $self->{_sidebar_buttons}{$key} = $btn;
+    };
+
+    # --- Botón de acción simple (sin toggle de visibilidad) ---
+    my $make_action = sub {
+        my ($label, $cmd) = @_;
+        $sidebar->Button(
+            -text             => $label,
+            -bg               => $bg_off,
+            -fg               => '#D1D4DC',
+            -activebackground => '#383D4A',
+            -activeforeground => '#FFFFFF',
+            -relief           => 'flat',
+            -anchor           => 'w',
+            -font             => $btn_font,
+            -padx             => 8,
+            -pady             => 4,
+            -cursor           => 'hand2',
+            -command          => $cmd,
+        )->pack(-fill => 'x', -padx => 4, -pady => 1);
+    };
+
+    # ── Sección: Estructura de Mercado ───────────────────────
+    $sep->('Estructura');
+    $make_toggle->('zigzag',           'ZZ  ZigZag');
+    $make_toggle->('bos_choch',        'BB  BOS / CHOCH');
+    $make_toggle->('structure_labels', 'HH  HH / HL / LH / LL');
+    $make_toggle->('fvg',              'FV  Fair Value Gap');
+
+    # ── Sección: Liquidez ────────────────────────────────────
+    $sep->('Liquidez');
+    $make_toggle->('bsl',              'UP  Buy-Side (BSL)');
+    $make_toggle->('ssl',              'DN  Sell-Side (SSL)');
+    $make_toggle->('eqh_eql',         'EQ  EQH / EQL');
+    $make_toggle->('liq_events',       'SW  Sweeps / Grabs');
+
+    # ── Sección: Replay ──────────────────────────────────────
+    $sep->('Replay');
+    $make_action->('[<] Paso atras',  sub { $self->step_replay(-1)  });
+    $make_action->('[>] Play',        sub { $self->play_replay()     });
+    $make_action->('[||] Pausa',      sub { $self->pause_replay()    });
+    $make_action->('[>>] Paso fwd',   sub { $self->step_replay(1)    });
 }
 
 1;

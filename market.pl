@@ -111,9 +111,23 @@ $toolbar->Button(
     -bg => '#2A2E39', -fg => '#d1d4dc', -activebackground => '#2962FF', -relief => 'flat', -font => 'Helvetica 9 bold'
 )->pack(-side => 'left', -padx => 5);
 
-# Creación de los Canvases (Paneles Visuales)
-my $price_canvas = $mw->Canvas(-bg => '#131722', -height => 600)->pack(-fill => 'both', -expand => 1);
-my $atr_canvas   = $mw->Canvas(-bg => '#131722', -height => 200)->pack(-fill => 'x');
+# Layout principal: barra lateral izquierda + canvases
+# El sidebar se crea AQUI (para que pack() lo posicione antes que los canvases)
+# y se POPULA desde ChartEngine::_build_sidebar().
+my $main_frame = $mw->Frame(-bg => '#131722')
+    ->pack(-side => 'top', -fill => 'both', -expand => 1);
+
+my $sidebar = $main_frame->Frame(-bg => '#1A1E2E', -width => 168)
+    ->pack(-side => 'left', -fill => 'y');
+$sidebar->pack_propagate(0);   # mantener el ancho fijo aunque los hijos sean pequeños
+
+my $charts_frame = $main_frame->Frame(-bg => '#131722')
+    ->pack(-side => 'right', -fill => 'both', -expand => 1);
+
+my $price_canvas = $charts_frame->Canvas(-bg => '#131722', -height => 600)
+    ->pack(-fill => 'both', -expand => 1);
+my $atr_canvas   = $charts_frame->Canvas(-bg => '#131722', -height => 200)
+    ->pack(-fill => 'x');
 
 # ==============================================================================
 # 2. Inicialización de Capas de Datos e Indicadores
@@ -219,6 +233,7 @@ $engine = Market::ChartEngine->new(
     indicators   => $indicators,
     price_canvas => $price_canvas,
     atr_canvas   => $atr_canvas,
+    sidebar      => $sidebar,   # Frame para la barra lateral de controles
 );
 
 # Obligar a Tk a calcular las dimensiones internas de la ventana antes de dibujar

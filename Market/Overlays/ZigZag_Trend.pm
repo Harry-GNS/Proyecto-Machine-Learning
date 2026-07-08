@@ -25,12 +25,13 @@ sub new {
 }
 
 sub render {
-    my ($self, $scale, $zz_slice, $start_idx_viewport) = @_;
+    my ($self, $scale, $zz_slice, $start_idx_viewport, $visibility) = @_;
     my $c = $self->{canvas};
 
-    # Limpiar dibujos anteriores de este overlay
     $c->delete('zigzag_overlay');
 
+    $visibility //= {};
+    return unless ($visibility->{zigzag} // 1);
     return unless $zz_slice && @$zz_slice;
     $start_idx_viewport //= 0;
 
