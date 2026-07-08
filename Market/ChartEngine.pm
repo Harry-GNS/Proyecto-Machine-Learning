@@ -10,6 +10,7 @@ use Market::Panels::ATRPanel;
 
 use Market::Overlays::Liquidity;
 use Market::Overlays::SMC_Structures;
+use Market::Overlays::ZigZag_Trend;
 sub new {
     my ($class, %args) = @_;
     
@@ -56,6 +57,7 @@ sub new {
     # NUEVO: Inicializar el Overlay de Liquidez
     $self->{liquidity_overlay} = Market::Overlays::Liquidity->new(canvas => $self->{price_canvas});
     $self->{smc_overlay} = Market::Overlays::SMC_Structures->new(canvas => $self->{price_canvas});
+    $self->{zigzag_overlay} = Market::Overlays::ZigZag_Trend->new(canvas => $self->{price_canvas});
     $self->bind_events();
     return $self;
 }
@@ -137,7 +139,13 @@ sub render {
         # Si está desactivado, borra de inmediato el overlay de la pantalla
         $self->{price_canvas}->delete('smc_overlay');
     }
-    
+
+    # ========================================================
+    # RENDERIZADO DEL OVERLAY ZIGZAG (ChartPrime port)
+    # ========================================================
+    my $zz_slice = $self->{indicators}->slice_array('ZigZag_Trend', $start, $end);
+    $self->{zigzag_overlay}->render($scale, $zz_slice, $start);
+
     # Panel Secundario (ATR)
     my $atr_width  = $self->{atr_canvas}->width;
     my $atr_height = $self->{atr_canvas}->height;

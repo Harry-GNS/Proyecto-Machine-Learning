@@ -132,6 +132,10 @@ $indicators->register('Liquidity', Market::Indicators::Liquidity->new(depth => 3
 use Market::Indicators::SMC_Structures;
 $indicators->register('SMC_Structures', Market::Indicators::SMC_Structures->new(depth => 3));
 
+# Registrar el detector de tendencia ZigZag macro (ChartPrime port, MPL-2.0)
+use Market::Indicators::ZigZag_Trend;
+$indicators->register('ZigZag_Trend', Market::Indicators::ZigZag_Trend->new(swing_length => 150));
+
 # ==============================================================================
 # DEPURACIÓN: Verificar detección de BOS y CHOCH
 # ==============================================================================
