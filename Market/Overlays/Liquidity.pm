@@ -44,7 +44,7 @@ sub render {
         next if !$punto;
 
         # =========================================================================
-        # 1. LÍNEAS ESTRUCTURALES Y ETIQUETAS BASE (BSL, SSL, EQH, EQL)
+        # 1. LÍNEAS ESTRUCTURALES Y ETIQUETAS BASE O RESUELTAS (BSL, SSL, EQH, EQL)
         # =========================================================================
         if (defined $punto->{state} && $punto->{state} ne 'none') {
             my $state = $punto->{state};
@@ -58,50 +58,63 @@ sub render {
             if ($should_show) {
                 my $level_price = $punto->{price};
                 my $end_idx     = $punto->{end_index} // $i;
+                my $res         = $punto->{resolution} // '';
 
-                my $x_start = ($i       - $offset_frac) * $candle_width + ($candle_width / 2);
-                my $x_end   = ($end_idx - $offset_frac) * $candle_width + ($candle_width / 2);
-                my $y = $height - ((($level_price - $min_val) / $range) * $height);
+                my $x_start = $scale->index_to_center_x($i);
+                my $x_end   = $scale->index_to_center_x($end_idx);
+                my $y       = $scale->value_to_y($level_price);
 
                 next if $y < -100 || $y > $height + 100;
 
+                my $text  = '';
+                my $color = '#FF5252';
+
                 if ($state eq 'swing_high') {
-                    $c->createLine($x_start, $y, $x_end, $y,
-                        -dash => '.', -fill => '#FF5252', -width => 1.5,
-                        -tags => ['liquidity_overlay']);
-                    if (defined $punto->{resolution} && $punto->{resolution} eq 'active') {
-                        $c->createText($x_end - 5, $y - 10,
-                            -text => 'BSL', -fill => '#FF5252', -anchor => 'e',
-                            -font => 'Helvetica 8 bold', -tags => ['liquidity_overlay']);
-                    }
+                    $color = '#FF5252';
+                    if ($res eq 'active') { $text = 'BSL'; }
+                    elsif ($res eq 'sweep') { $text = 'SWEEP ↑'; }
+                    elsif ($res eq 'grab') { $text = 'LQ GRAB'; $color = '#FF9100'; }
+                    elsif ($res eq 'run') { $text = 'LQ RUN'; $color = '#2979FF'; }
                 }
                 elsif ($state eq 'swing_low') {
-                    $c->createLine($x_start, $y, $x_end, $y,
-                        -dash => '.', -fill => '#00E676', -width => 1.5,
-                        -tags => ['liquidity_overlay']);
-                    if (defined $punto->{resolution} && $punto->{resolution} eq 'active') {
-                        $c->createText($x_end - 5, $y + 10,
-                            -text => 'SSL', -fill => '#00E676', -anchor => 'e',
-                            -font => 'Helvetica 8 bold', -tags => ['liquidity_overlay']);
-                    }
+                    $color = '#00E676';
+                    if ($res eq 'active') { $text = 'SSL'; }
+                    elsif ($res eq 'sweep') { $text = 'SWEEP↓'; }
+                    elsif ($res eq 'grab') { $text = 'LQ GRAB'; $color = '#FF9100'; }
+                    elsif ($res eq 'run') { $text = 'LQ RUN'; $color = '#2979FF'; }
                 }
                 elsif ($state eq 'eqh') {
+                    $color = $self->{color_eqh};
+                    if ($res eq 'active') { $text = 'EQH'; }
+                    elsif ($res eq 'sweep') { $text = 'SWEEP ↑'; }
+                    elsif ($res eq 'grab') { $text = 'LQ GRAB'; $color = '#FF9100'; }
+                    elsif ($res eq 'run') { $text = 'LQ RUN'; $color = '#2979FF'; }
+                }
+                elsif ($state eq 'eql') {
+                    $color = $self->{color_eql};
+                    if ($res eq 'active') { $text = 'EQL'; }
+                    elsif ($res eq 'sweep') { $text = 'SWEEP↓'; }
+                    elsif ($res eq 'grab') { $text = 'LQ GRAB'; $color = '#FF9100'; }
+                    elsif ($res eq 'run') { $text = 'LQ RUN'; $color = '#2979FF'; }
+                }
+
+                if ($state eq 'swing_high' || $state eq 'eqh') {
                     $c->createLine($x_start, $y, $x_end, $y,
-                        -fill => $self->{color_eqh}, -width => 2.0,
+                        -dash => ($state eq 'eqh' ? '-' : '.'), -fill => $color, -width => ($state eq 'eqh' ? 2.0 : 1.5),
                         -tags => ['liquidity_overlay']);
-                    if (defined $punto->{resolution} && $punto->{resolution} eq 'active') {
+                    if ($text ne '') {
                         $c->createText($x_end - 5, $y - 10,
-                            -text => 'EQH', -fill => $self->{color_eqh}, -anchor => 'e',
+                            -text => $text, -fill => $color, -anchor => 'e',
                             -font => 'Helvetica 8 bold', -tags => ['liquidity_overlay']);
                     }
                 }
-                elsif ($state eq 'eql') {
+                elsif ($state eq 'swing_low' || $state eq 'eql') {
                     $c->createLine($x_start, $y, $x_end, $y,
-                        -fill => $self->{color_eql}, -width => 2.0,
+                        -dash => ($state eq 'eql' ? '-' : '.'), -fill => $color, -width => ($state eq 'eql' ? 2.0 : 1.5),
                         -tags => ['liquidity_overlay']);
-                    if (defined $punto->{resolution} && $punto->{resolution} eq 'active') {
+                    if ($text ne '') {
                         $c->createText($x_end - 5, $y + 10,
-                            -text => 'EQL', -fill => $self->{color_eql}, -anchor => 'e',
+                            -text => $text, -fill => $color, -anchor => 'e',
                             -font => 'Helvetica 8 bold', -tags => ['liquidity_overlay']);
                     }
                 }
@@ -109,12 +122,12 @@ sub render {
         }
 
         # =========================================================================
-        # 2. SWEEPS, GRABS, RUNS (Liquidity Events)
+        # 2. SWEEPS, GRABS, RUNS (Liquidity Events) - Flotantes sobre vela de evento
         # =========================================================================
         if ($show->('liq_events') && exists $punto->{events} && @{ $punto->{events} }) {
             for my $ev (@{ $punto->{events} }) {
-                my $x_event = ($i - $offset_frac) * $candle_width + ($candle_width / 2);
-                my $y_event = $height - ((($ev->{price} - $min_val) / $range) * $height);
+                my $x_event = $scale->index_to_center_x($i);
+                my $y_event = $scale->value_to_y($ev->{price});
 
                 next if $y_event < 0 || $y_event > $height;
 

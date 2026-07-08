@@ -173,6 +173,8 @@ sub calculate {
 
                 if (!$resolved) {
                     $self->{data}->[$origin_idx]->{end_index} = $i;
+                    # FIX: Keep in memory until definitive resolution (for Replay persistence)
+                    push @new_active_highs, $origin_idx;
                 }
             } else {
                 push @new_active_highs, $origin_idx;
@@ -237,6 +239,8 @@ sub calculate {
 
                 if (!$resolved) {
                     $self->{data}->[$origin_idx]->{end_index} = $i;
+                    # FIX: Keep in memory until definitive resolution (for Replay persistence)
+                    push @new_active_lows, $origin_idx;
                 }
             } else {
                 push @new_active_lows, $origin_idx;

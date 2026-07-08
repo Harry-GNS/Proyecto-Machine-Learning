@@ -61,14 +61,15 @@ sub render {
                 my $rel_origin = $ev->{origin} - $start_idx_viewport;
                 my $rel_break  = $i;
 
-                my $x_start = ($rel_origin - $offset_frac) * $candle_width + ($candle_width / 2);
-                my $x_end   = ($rel_break  - $offset_frac) * $candle_width + ($candle_width / 2);
-                my $y       = $height - ((($ev->{price} - $min_val) / $range) * $height);
+                my $x_start = $scale->index_to_center_x($rel_origin);
+                my $x_end   = $scale->index_to_center_x($rel_break);
+                my $y       = $scale->value_to_y($ev->{price});
 
                 my $color = $ev->{dir} eq 'bullish' ? '#2979FF' : '#FF5252';
 
+                # Atenuación de línea de contratendencia (BOS/CHOCH) usando línea de guiones
                 $c->createLine($x_start, $y, $x_end, $y,
-                    -fill => $color, -width => 2, -tags => ['smc_overlay']);
+                    -dash => '-', -fill => $color, -width => 1.5, -tags => ['smc_overlay']);
                 $c->createText(($x_start + $x_end) / 2, $y - 8,
                     -text => $ev->{type}, -fill => $color,
                     -font => 'Helvetica 9 bold', -tags => ['smc_overlay']);
@@ -81,8 +82,8 @@ sub render {
         if ($show->('structure_labels')
             && defined $punto->{state} && $punto->{state} ne 'none')
         {
-            my $x = ($i - $offset_frac) * $candle_width + ($candle_width / 2);
-            my $y = $height - ((($punto->{price} - $min_val) / $range) * $height);
+            my $x = $scale->index_to_center_x($i);
+            my $y = $scale->value_to_y($punto->{price});
             my $oy = ($punto->{state} =~ /H$/) ? -15 : 15;
 
             $c->createText($x, $y + $oy,
@@ -97,27 +98,36 @@ sub render {
     if ($show->('fvg')) {
         for my $fvg (@fvgs_to_draw) {
             my $rel_start = $fvg->{start_idx} - $start_idx_viewport;
-            my $x1 = ($rel_start - $offset_frac) * $candle_width + ($candle_width / 2);
+            my $x1 = $scale->index_to_center_x($rel_start);
             my $x2;
 
-            if (defined $fvg->{mitigated_idx}) {
+            my $is_mitigated = defined $fvg->{mitigated_idx};
+
+            if ($is_mitigated) {
                 my $rel_end = $fvg->{mitigated_idx} - $start_idx_viewport;
                 next if $rel_end < $offset_frac;
-                $x2 = ($rel_end - $offset_frac) * $candle_width + ($candle_width / 2);
+                $x2 = $scale->index_to_center_x($rel_end);
             } else {
                 $x2 = $width + 2000;
             }
 
-            my $y1 = $height - ((($fvg->{top}    - $min_val) / $range) * $height);
-            my $y2 = $height - ((($fvg->{bottom} - $min_val) / $range) * $height);
+            my $y1 = $scale->value_to_y($fvg->{top});
+            my $y2 = $scale->value_to_y($fvg->{bottom});
 
             my $color = $fvg->{type} eq 'bullish_fvg' ? '#2979FF' : '#FF5252';
+            my $outline_dash = '-';
+            
+            # Regla de mitigación: atenuar canales obsoletos
+            if ($is_mitigated) {
+                $color = '#4B5563'; # Gris tenue
+                $outline_dash = '.'; # Guiones muy finos
+            }
 
             $c->createRectangle($x1, $y1, $x2, $y2,
                 -fill => $color, -outline => $color, -stipple => 'gray25',
                 -tags => ['smc_overlay']);
             $c->createLine($x1, ($y1+$y2)/2, $x2, ($y1+$y2)/2,
-                -dash => '-', -fill => $color, -width => 1,
+                -dash => $outline_dash, -fill => $color, -width => 1,
                 -tags => ['smc_overlay']);
         }
     }
