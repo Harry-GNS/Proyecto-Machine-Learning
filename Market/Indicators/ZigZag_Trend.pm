@@ -1,12 +1,24 @@
-# This Perl code is a port of logic from:
-#   "ZigZag Volume Profile [ChartPrime]" (Pine Script® v6)
+# This Perl code is a port of the ZigZag algorithm from:
+#   "ZigZag Multi Time Frame with Fibonacci Retracement" (Pine Script® v4)
 #   Subject to the terms of the Mozilla Public License 2.0
 #   https://mozilla.org/MPL/2.0/
-#   © ChartPrime
+#   © LonesomeTheBlue
 #
 # Port author: Proyecto-Machine-Learning
-# Only the swing/pivot/trend-detection logic has been ported.
-# Volume Profile, POC, swing channel and all drawing code are excluded.
+# Only the core ZigZag detection logic (pivots, direction, array) is ported.
+# Fibonacci retracement levels, labels, multi-timeframe resolution, and all
+# drawing code are excluded.
+#
+# Equivalence map (Pine → Perl):
+#   prd                          → $self->{prd}        (period, default 2)
+#   highestbars(high, len)==0    → current high == max of last prd highs
+#   lowestbars(low, len)==0      → current low  == min of last prd lows
+#   ph / pl                      → $ph / $pl
+#   var dir = 0                  → $self->{_dir}        (0=init, 1=up, -1=down)
+#   var zigzag = array           → $self->{_zigzag}     ([val0,bar0,val1,bar1,...])
+#   add_to_zigzag(v,b)           → _add_to_zigzag($v,$b)
+#   update_zigzag(v,b)           → _update_zigzag($v,$b)
+#   dirchanged                   → $dir_changed
 
 package Market::Indicators::ZigZag_Trend;
 
@@ -18,45 +30,42 @@ use List::Util qw(max min);
 # CONSTRUCTOR
 # =============================================================================
 # Parámetros:
-#   swing_length        => int   (default 150) — equivalente a swingLength del original
-#   pivot_high_uses_low => bool  (default 1)   — 1 = precio del pivote alto es low[1]
-#                                                (fiel al original ChartPrime)
-#                                                0 = usa high[1] en su lugar
+#   prd          => int  (default 2, rango 2–10 como en el original)
+#                        Equivale a "ZigZag Period" del Pine Script.
+#                        Controla cuántas barras debe ser el high/low el extremo
+#                        de la ventana para considerarse un pivote.
+#   swing_length => int  Alias de prd (compatibilidad con versión anterior).
+#
+# Nota: El parámetro `tf` (timeframe) del original no se porta; el módulo
+# opera sobre la temporalidad ya seleccionada en MarketData. Para simular
+# tf=D en datos de 1m, construye las velas D con build_tf_candles y pasa
+# ese MarketData con set_timeframe('D').
 # =============================================================================
 sub new {
     my ($class, %args) = @_;
+    my $prd = $args{prd} // $args{swing_length} // 2;
 
     my $self = {
-        # --- Parámetros configurables ---
-        swing_length        => $args{swing_length}        // 150,
-        pivot_high_uses_low => $args{pivot_high_uses_low} // 1,
+        # --- Parámetros ---
+        prd              => $prd,
+        max_zigzag_pairs => 50,    # max_array_size del Pine (guarda 50 pivotes)
 
-        # --- Estado interno del indicador (streaming) ---
-        _highs     => [],   # histórico de highs  (ventana deslizante)
-        _lows      => [],   # histórico de lows   (ventana deslizante)
-        _bar_count => 0,    # número de barras procesadas hasta ahora
+        # --- Estado interno (var en Pine) ---
+        _highs_window => [],       # ventana deslizante de prd highs
+        _lows_window  => [],       # ventana deslizante de prd lows
 
-        # --- Variables de estado equivalentes a las `var` de Pine Script ---
-        _is_bullish => undef,   # bool | undef  — isBullish
+        # dir: 0=inicial, 1=alcista, -1=bajista
+        # Pine: var dir = 0
+        _dir => 0,
 
-        # Último pivote alto confirmado
-        _bar_index_high => undef,
-        _price_high     => undef,
+        # zigzag array: [val0,bar0, val1,bar1, val2,bar2, ...]
+        # Índice 0 = pivote más reciente, índice 2 = segundo más reciente, etc.
+        # Pine: var zigzag = array.new_float(0)
+        _zigzag => [],
 
-        # Último pivote bajo confirmado
-        _bar_index_low => undef,
-        _price_low     => undef,
-
-        # Tramo activo en curso (puede actualizarse barra a barra — REPAINT)
-        _active_segment => undef,
-
-        # Lista de tramos completados del zigzag
-        _segments => [],
-
-        # --- Salida por barra (array paralelo a las velas de MarketData) ---
+        # --- Salida por barra ---
         data => [],
     };
-
     bless $self, $class;
     return $self;
 }
@@ -65,277 +74,256 @@ sub new {
 # INTERFAZ PÚBLICA ESTÁNDAR (compatible con IndicatorManager)
 # =============================================================================
 
-# update_last: procesa la barra más reciente en modo streaming.
-# Solo utiliza datos hasta la barra actual inclusive (sin lookahead).
 sub update_last {
     my ($self, $market_data) = @_;
-
-    my $current_index = $market_data->last_index();
-    return unless defined $current_index;
-
-    my $candle = $market_data->get_candle($current_index);
+    my $idx = $market_data->last_index();
+    return unless defined $idx;
+    my $candle = $market_data->get_candle($idx);
     return unless defined $candle;
-
-    my $prev_candle = ($current_index > 0)
-        ? $market_data->get_candle($current_index - 1)
-        : undef;
-
-    $self->_process_bar($current_index, $candle, $prev_candle, $market_data);
+    $self->_process_bar($idx, $candle);
 }
 
-# calculate_batch: recalcula todas las barras desde cero.
 sub calculate_batch {
     my ($self, $market_data) = @_;
     $self->reset();
-
     my $size = $market_data->size();
     for my $i (0 .. $size - 1) {
-        my $candle      = $market_data->get_candle($i);
-        my $prev_candle = ($i > 0) ? $market_data->get_candle($i - 1) : undef;
-        $self->_process_bar($i, $candle, $prev_candle, $market_data);
+        my $candle = $market_data->get_candle($i);
+        $self->_process_bar($i, $candle);
     }
 }
 
-# get_values: devuelve el array de resultados, un hashref por barra.
 sub get_values {
     my ($self) = @_;
     return $self->{data};
 }
 
-# reset: limpia todo el estado interno para recalcular desde cero.
 sub reset {
     my ($self) = @_;
-    $self->{_highs}          = [];
-    $self->{_lows}           = [];
-    $self->{_bar_count}      = 0;
-    $self->{_is_bullish}     = undef;
-    $self->{_bar_index_high} = undef;
-    $self->{_price_high}     = undef;
-    $self->{_bar_index_low}  = undef;
-    $self->{_price_low}      = undef;
-    $self->{_active_segment} = undef;
-    $self->{_segments}       = [];
-    $self->{data}            = [];
+    $self->{_highs_window} = [];
+    $self->{_lows_window}  = [];
+    $self->{_dir}          = 0;
+    $self->{_zigzag}       = [];
+    $self->{data}          = [];
 }
 
 # =============================================================================
-# LÓGICA INTERNA — PROCESAMIENTO DE UNA BARRA
+# FUNCIONES INTERNAS DEL ZIGZAG — traducción directa del Pine Script
 # =============================================================================
-# Traducción directa del Pine Script de ChartPrime, bloque por bloque.
-# Las referencias al original se anotan con comentarios Pine: ...
+
+# add_to_zigzag(value, bindex) del Pine:
+#   array.unshift(zigzag, bindex)
+#   array.unshift(zigzag, value)
+#   → zigzag[0]=value, zigzag[1]=bindex (más reciente al frente)
+#
+# REPAINT: Cada vez que se llama, el pivote actual se convierte en el
+# segundo más reciente, empujando todo hacia atrás.
+sub _add_to_zigzag {
+    my ($self, $value, $bar_idx) = @_;
+    unshift @{ $self->{_zigzag} }, $bar_idx;   # primero bindex (queda en [1])
+    unshift @{ $self->{_zigzag} }, $value;     # luego value  (queda en [0])
+
+    # Limitar a max_zigzag_pairs pares (= max_array_size del Pine)
+    my $max_elements = $self->{max_zigzag_pairs} * 2;
+    while (scalar @{ $self->{_zigzag} } > $max_elements) {
+        pop @{ $self->{_zigzag} };   # elimina el elemento más antiguo (valor)
+        pop @{ $self->{_zigzag} };   # elimina el bar_index asociado
+    }
+}
+
+# update_zigzag(value, bindex) del Pine:
+#   Si el zigzag está vacío → add_to_zigzag
+#   Si dir==1 y value > zigzag[0]  → reemplazar el pivote más reciente (nuevo máximo)
+#   Si dir==-1 y value < zigzag[0] → reemplazar el pivote más reciente (nuevo mínimo)
+#
+# REPAINT: Mientras la tendencia continúa, el extremo del tramo activo
+# se actualiza barra a barra hasta que ocurra un cambio de dirección.
+sub _update_zigzag {
+    my ($self, $value, $bar_idx) = @_;
+    my $zz  = $self->{_zigzag};
+    my $dir = $self->{_dir};
+
+    if (!@$zz) {
+        $self->_add_to_zigzag($value, $bar_idx);
+        return;
+    }
+
+    # Actualizar solo si el nuevo valor supera al actual en la dirección correcta
+    if (($dir == 1 && $value > $zz->[0]) || ($dir == -1 && $value < $zz->[0])) {
+        $zz->[0] = $value;    # actualizar valor
+        $zz->[1] = $bar_idx;  # actualizar bar_index
+    }
+}
+
+# =============================================================================
+# LÓGICA PRINCIPAL — PROCESAMIENTO DE UNA BARRA
 # =============================================================================
 sub _process_bar {
-    my ($self, $bar_idx, $candle, $prev_candle, $market_data) = @_;
-
-    my $n = $self->{swing_length};
+    my ($self, $bar_idx, $candle) = @_;
+    my $prd = $self->{prd};
 
     # ------------------------------------------------------------------
-    # 1. Mantener ventanas deslizantes de highs y lows
-    #    Equivalente a ta.highest(high, N) y ta.lowest(low, N) de Pine.
-    #    Pine incluye la barra actual en el cálculo ("last N bars including
-    #    current bar"), por lo que primero añadimos la vela actual y luego
-    #    truncamos la ventana a N elementos.
+    # 1. Mantener ventana deslizante de prd highs y lows
+    #    Equivale a highestbars(high, len)==0 / lowestbars(low, len)==0
+    #    del Pine, donde len = prd (asumiendo misma temporalidad que tf).
     # ------------------------------------------------------------------
-    push @{ $self->{_highs} }, $candle->{high};
-    push @{ $self->{_lows}  }, $candle->{low};
+    push @{ $self->{_highs_window} }, $candle->{high};
+    push @{ $self->{_lows_window}  }, $candle->{low};
 
-    # Limitar la ventana a N elementos (la más antigua sale por la izquierda)
-    if (scalar @{ $self->{_highs} } > $n) {
-        shift @{ $self->{_highs} };
-        shift @{ $self->{_lows}  };
+    if (scalar @{ $self->{_highs_window} } > $prd) {
+        shift @{ $self->{_highs_window} };
+        shift @{ $self->{_lows_window}  };
     }
 
-    # swingHigh = ta.highest(N)   — máximo de los últimos N highs incl. actual
-    # swingLow  = ta.lowest(N)    — mínimo de los últimos N lows  incl. actual
-    my $swing_high = max(@{ $self->{_highs} });
-    my $swing_low  = min(@{ $self->{_lows}  });
+    my $max_h = max(@{ $self->{_highs_window} });
+    my $min_l = min(@{ $self->{_lows_window}  });
+
+    # ph: la barra actual tiene el high más alto de la ventana (highestbars==0)
+    # pl: la barra actual tiene el low  más bajo  de la ventana (lowestbars==0)
+    # Pine: ph := highestbars(high, nz(len,1)) == 0 ? high : na
+    my $ph = ($candle->{high} == $max_h) ? $candle->{high} : undef;
+    my $pl = ($candle->{low}  == $min_l) ? $candle->{low}  : undef;
 
     # ------------------------------------------------------------------
-    # 2. Valores de la barra anterior para comparaciones [1]
+    # 2. Actualizar dirección
+    #    Pine: dir := iff(ph and na(pl), 1, iff(pl and na(ph), -1, dir))
+    #    • Solo ph  → dir = 1  (alcista)
+    #    • Solo pl  → dir = -1 (bajista)
+    #    • Ambos o ninguno → dir no cambia
     # ------------------------------------------------------------------
-    # En Pine, swingHigh[1] es el ta.highest calculado en la barra anterior.
-    # Lo almacenamos en el slot data[$bar_idx - 1] que ya existe.
-    my $prev_swing_high = undef;
-    my $prev_swing_low  = undef;
-    my $prev_is_bullish = $self->{_is_bullish};  # isBullish[1]
+    my $prev_dir = $self->{_dir};
+    my $dir      = $self->{_dir};
 
-    if ($bar_idx > 0 && defined $self->{data}->[$bar_idx - 1]) {
-        $prev_swing_high = $self->{data}->[$bar_idx - 1]{swing_high};
-        $prev_swing_low  = $self->{data}->[$bar_idx - 1]{swing_low};
+    if (defined $ph && !defined $pl) {
+        $dir = 1;
+    }
+    elsif (defined $pl && !defined $ph) {
+        $dir = -1;
+    }
+    # si ambas o ninguna: dir queda igual
+
+    $self->{_dir} = $dir;
+
+    # ------------------------------------------------------------------
+    # 3. Actualizar el array zigzag cuando hay pivote detectado
+    #    Pine:
+    #      bool dirchanged = (dir != dir[1])
+    #      if ph or pl
+    #          if dirchanged → add_to_zigzag(dir==1 ? ph : pl, bar_index)
+    #          else          → update_zigzag(dir==1 ? ph : pl, bar_index)
+    # ------------------------------------------------------------------
+    if (defined $ph || defined $pl) {
+        my $dir_changed = ($dir != $prev_dir);
+
+        # El valor a usar es el high si dir==1, el low si dir==-1.
+        # Si dir==0 (caso de arranque con ambas condiciones falsas), usa lo que haya.
+        my $val;
+        if ($dir == 1) {
+            $val = $ph;
+        }
+        elsif ($dir == -1) {
+            $val = $pl;
+        }
+        else {
+            $val = defined $ph ? $ph : $pl;
+        }
+
+        if ($dir_changed) {
+            $self->_add_to_zigzag($val, $bar_idx);
+        }
+        else {
+            $self->_update_zigzag($val, $bar_idx);
+        }
     }
 
     # ------------------------------------------------------------------
-    # 3. Actualización de tendencia
-    #    Pine original:
-    #      if swingHigh == high → isBullish := true
-    #      if swingLow  == low  → isBullish := false
-    #    Si ambas condiciones se cumplen en la misma barra, el segundo
-    #    if sobreescribe al primero → queda false (bajista). Fiel al original.
-    # ------------------------------------------------------------------
-    my $is_bullish = $self->{_is_bullish};  # heredar estado previo
-
-    if ($candle->{high} == $swing_high) {
-        $is_bullish = 1;   # bullish
-    }
-    if ($candle->{low} == $swing_low) {
-        $is_bullish = 0;   # bearish  (evalúa después → sobreescribe si ambas)
-    }
-
-    $self->{_is_bullish} = $is_bullish;
-
-    # ------------------------------------------------------------------
-    # 4. Detección de pivote ALTO confirmado
-    #    Pine original:
-    #      if high[1] == swingHigh[1] and high < swingHigh
-    #          barIndexHigh := bar_index[1]
-    #          priceHigh    := low[1]   ← OJO: es low[1], no high[1]
+    # 4. Construir salida a partir del array zigzag
     #
-    #    El parámetro pivot_high_uses_low controla esto:
-    #      1 (default) → precio = low[barra anterior]   (fiel al original)
-    #      0           → precio = high[barra anterior]  (alternativa intuitiva)
-    # ------------------------------------------------------------------
-    if (defined $prev_candle && defined $prev_swing_high
-        && $prev_candle->{high} == $prev_swing_high
-        && $candle->{high} < $swing_high)
-    {
-        $self->{_bar_index_high} = $bar_idx - 1;
-        $self->{_price_high}     = $self->{pivot_high_uses_low}
-            ? $prev_candle->{low}   # fiel al original ChartPrime
-            : $prev_candle->{high}; # alternativa cuando pivot_high_uses_low=0
-    }
-
-    # ------------------------------------------------------------------
-    # 5. Detección de pivote BAJO confirmado
-    #    Pine original:
-    #      if low[1] == swingLow[1] and low > swingLow
-    #          barIndexLow := bar_index[1]
-    #          priceLow    := low[1]
-    # ------------------------------------------------------------------
-    if (defined $prev_candle && defined $prev_swing_low
-        && $prev_candle->{low} == $prev_swing_low
-        && $candle->{low} > $swing_low)
-    {
-        $self->{_bar_index_low} = $bar_idx - 1;
-        $self->{_price_low}     = $prev_candle->{low};
-    }
-
-    # ------------------------------------------------------------------
-    # 6. Cambio de tendencia → cierra tramo y abre uno nuevo
-    #    Pine original:
-    #      if isBullish != isBullish[1] and isBullish     → tramo bajista→alcista
-    #      if isBullish != isBullish[1] and not isBullish → tramo alcista→bajista
-    # ------------------------------------------------------------------
-    my $trend_changed = 0;
-
-    if (defined $is_bullish && defined $prev_is_bullish
-        && $is_bullish != $prev_is_bullish)
-    {
-        $trend_changed = 1;
-
-        # Cerrar el tramo activo y guardarlo en la lista de completados
-        if (defined $self->{_active_segment}) {
-            my $seg = $self->{_active_segment};
-
-            # Actualizar el extremo final del tramo cerrado con el último
-            # pivote conocido antes del cambio de tendencia
-            if ($is_bullish) {
-                # Acabamos de girar a alcista: el tramo que se cierra era bajista
-                # Pine: zigzagLine := line.new(barIndexLow, priceLow, barIndexHigh, priceHigh)
-                $seg->{to_bar}   = $self->{_bar_index_high} // $bar_idx;
-                $seg->{to_price} = $self->{_price_high}     // $candle->{high};
-            } else {
-                # Acabamos de girar a bajista: el tramo que se cierra era alcista
-                # Pine: zigzagLine := line.new(barIndexHigh, priceHigh, barIndexLow, priceLow)
-                $seg->{to_bar}   = $self->{_bar_index_low} // $bar_idx;
-                $seg->{to_price} = $self->{_price_low}     // $candle->{low};
-            }
-
-            push @{ $self->{_segments} }, {%$seg};  # copia inmutable al historial
-        }
-
-        # Abrir nuevo tramo activo
-        if ($is_bullish) {
-            # Nuevo tramo alcista: parte desde el pivote bajo hacia el pivote alto
-            $self->{_active_segment} = {
-                from_bar   => $self->{_bar_index_low} // $bar_idx,
-                from_price => $self->{_price_low}     // $candle->{low},
-                to_bar     => $self->{_bar_index_high} // $bar_idx,
-                to_price   => $self->{_price_high}     // $candle->{high},
-                direction  => 'bullish',
-            };
-        } else {
-            # Nuevo tramo bajista: parte desde el pivote alto hacia el pivote bajo
-            $self->{_active_segment} = {
-                from_bar   => $self->{_bar_index_high} // $bar_idx,
-                from_price => $self->{_price_high}     // $candle->{high},
-                to_bar     => $self->{_bar_index_low} // $bar_idx,
-                to_price   => $self->{_price_low}     // $candle->{low},
-                direction  => 'bearish',
-            };
-        }
-    }
-
-    # ------------------------------------------------------------------
-    # 7. Actualización del extremo del tramo en curso (REPAINT)
-    #    Pine original:
-    #      if isBullish and priceHigh != priceHigh[1]
-    #          zigzagLine.set_xy2(barIndexHigh, priceHigh)
-    #      if not isBullish and priceLow != priceLow[1]
-    #          zigzagLine.set_xy2(barIndexLow, priceLow)
+    #    Layout del array (más reciente primero):
+    #    [val0, bar0,  val1, bar1,  val2, bar2, ...]
+    #     ^--- P0       ^--- P1       ^--- P2
+    #     (más reciente)
     #
-    #    REPAINT: el extremo "to" del tramo activo se mueve con cada nuevo
-    #    pivote confirmado, exactamente igual que en TradingView. Esta es
-    #    la fuente del comportamiento "repaint" del zigzag original.
-    #    El tramo solo queda fijo cuando se emite al historial (_segments).
+    #    Segmento activo (REPAINT): P1 → P0
+    #    Segmentos completados: P2→P1, P3→P2, P4→P3, ...
     # ------------------------------------------------------------------
-    if (defined $self->{_active_segment} && !$trend_changed) {
-        if ($is_bullish) {
-            # REPAINT: actualizar extremo superior del tramo alcista activo
-            if (defined $self->{_bar_index_high} && defined $self->{_price_high}) {
-                $self->{_active_segment}{to_bar}   = $self->{_bar_index_high};
-                $self->{_active_segment}{to_price} = $self->{_price_high};
-            }
-        } elsif (defined $is_bullish && !$is_bullish) {
-            # REPAINT: actualizar extremo inferior del tramo bajista activo
-            if (defined $self->{_bar_index_low} && defined $self->{_price_low}) {
-                $self->{_active_segment}{to_bar}   = $self->{_bar_index_low};
-                $self->{_active_segment}{to_price} = $self->{_price_low};
-            }
+    my $zz = $self->{_zigzag};
+    my $n  = scalar @$zz;   # número de elementos (siempre par)
+
+    # --- Tendencia ---
+    my $trend = ($dir ==  1) ? 'bullish'
+              : ($dir == -1) ? 'bearish'
+              : undef;
+
+    my $trend_changed = ($dir != 0 && $dir != $prev_dir) ? 1 : 0;
+
+    # --- Segmento activo (entre P1 y P0) ---
+    # REPAINT: zigzag[0] y zigzag[1] cambian barra a barra mientras dir no gira
+    my $active_segment = undef;
+    if ($n >= 4) {
+        $active_segment = {
+            from_bar   => $zz->[3],   # bar  de P1 (segundo más reciente)
+            from_price => $zz->[2],   # valor de P1
+            to_bar     => $zz->[1],   # bar  de P0 (más reciente)
+            to_price   => $zz->[0],   # valor de P0
+            direction  => ($zz->[0] > $zz->[2]) ? 'bullish' : 'bearish',
+        };
+    }
+
+    # --- Segmentos completados (P_{k+1} → P_k para k ≥ 1) ---
+    # Ordenados del más antiguo al más reciente para renderizado natural.
+    my @completed;
+    for (my $i = $n - 2; $i >= 4; $i -= 2) {
+        push @completed, {
+            from_bar   => $zz->[$i+1],   # bar  del punto más antiguo
+            from_price => $zz->[$i],     # valor del punto más antiguo
+            to_bar     => $zz->[$i-1],   # bar  del punto más nuevo
+            to_price   => $zz->[$i-2],   # valor del punto más nuevo
+            direction  => ($zz->[$i-2] > $zz->[$i]) ? 'bullish' : 'bearish',
+        };
+    }
+
+    # --- Pivotes confirmados ---
+    # Si dir==1: P0 es un HIGH, P1 es un LOW
+    # Si dir==-1: P0 es un LOW, P1 es un HIGH
+    my ($pivot_high, $pivot_low) = (undef, undef);
+    if ($n >= 4) {
+        if ($dir == 1) {
+            $pivot_high = { bar_index => $zz->[1], price => $zz->[0] };
+            $pivot_low  = { bar_index => $zz->[3], price => $zz->[2] };
         }
+        elsif ($dir == -1) {
+            $pivot_low  = { bar_index => $zz->[1], price => $zz->[0] };
+            $pivot_high = { bar_index => $zz->[3], price => $zz->[2] };
+        }
+    }
+    elsif ($n >= 2) {
+        # Solo un pivote conocido aún
+        if ($dir == 1)  { $pivot_high = { bar_index => $zz->[1], price => $zz->[0] }; }
+        elsif ($dir == -1) { $pivot_low  = { bar_index => $zz->[1], price => $zz->[0] }; }
     }
 
     # ------------------------------------------------------------------
-    # 8. Guardar resultado de esta barra
+    # 5. Guardar resultado de la barra
     # ------------------------------------------------------------------
     $self->{data}[$bar_idx] = {
-        # Estado de tendencia
-        trend         => (defined $is_bullish ? ($is_bullish ? 'bullish' : 'bearish') : undef),
-        trend_changed => $trend_changed,
+        trend          => $trend,
+        trend_changed  => $trend_changed,
 
-        # Swing extremes de esta barra (equivalentes a swingHigh/swingLow en Pine)
-        swing_high => $swing_high,
-        swing_low  => $swing_low,
+        # Extremos de la ventana actual (equivalentes a highestbars/lowestbars)
+        swing_high => $max_h,
+        swing_low  => $min_l,
 
-        # Último pivote alto confirmado (inmutable hasta que se confirme otro)
-        pivot_high => (defined $self->{_bar_index_high} ? {
-            bar_index => $self->{_bar_index_high},
-            price     => $self->{_price_high},
-        } : undef),
+        # Pivotes confirmados (posición fija hasta que se confirme uno nuevo)
+        pivot_high => $pivot_high,
+        pivot_low  => $pivot_low,
 
-        # Último pivote bajo confirmado
-        pivot_low => (defined $self->{_bar_index_low} ? {
-            bar_index => $self->{_bar_index_low},
-            price     => $self->{_price_low},
-        } : undef),
+        # Tramos del zigzag
+        segments       => [@completed],    # completados (inmutables)
+        active_segment => $active_segment, # en curso (REPAINT)
 
-        # Instantánea de los tramos completados hasta esta barra
-        # (referencia al mismo array; el consumidor puede usar scalar @$segments)
-        segments => [ @{ $self->{_segments} } ],
-
-        # Tramo activo en curso (puede cambiar en barras futuras — REPAINT)
-        active_segment => (defined $self->{_active_segment}
-            ? {%{ $self->{_active_segment} }}
-            : undef),
+        # Número de pivotes en el array (diagnóstico)
+        zigzag_points => int($n / 2),
     };
 }
 

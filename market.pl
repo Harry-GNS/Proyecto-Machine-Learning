@@ -134,7 +134,7 @@ $indicators->register('SMC_Structures', Market::Indicators::SMC_Structures->new(
 
 # Registrar el detector de tendencia ZigZag macro (ChartPrime port, MPL-2.0)
 use Market::Indicators::ZigZag_Trend;
-$indicators->register('ZigZag_Trend', Market::Indicators::ZigZag_Trend->new(swing_length => 150));
+$indicators->register('ZigZag_Trend', Market::Indicators::ZigZag_Trend->new(prd => 2));
 
 # ==============================================================================
 # DEPURACIÓN: Verificar detección de BOS y CHOCH
