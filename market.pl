@@ -119,7 +119,7 @@ my $main_frame = $mw->Frame(-bg => '#131722')
 
 my $sidebar = $main_frame->Frame(-bg => '#1A1E2E', -width => 168)
     ->pack(-side => 'left', -fill => 'y');
-$sidebar->pack_propagate(0);   # mantener el ancho fijo aunque los hijos sean pequeños
+$sidebar->packPropagate(0);   # mantener el ancho fijo aunque los hijos sean pequeños
 
 my $charts_frame = $main_frame->Frame(-bg => '#131722')
     ->pack(-side => 'right', -fill => 'both', -expand => 1);
