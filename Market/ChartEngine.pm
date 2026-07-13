@@ -12,6 +12,8 @@ use Market::Panels::ATRPanel;
 use Market::Overlays::Liquidity;
 use Market::Overlays::SMC_Structures;
 use Market::Overlays::ZigZag_Trend;
+use Market::Overlays::Volume_Profile;
+use Market::Overlays::Anchored_VWAP;
 sub new {
     my ($class, %args) = @_;
     
@@ -59,6 +61,14 @@ sub new {
             ssl              => 1,  # Sell-Side Liquidity
             eqh_eql          => 1,  # Equal Highs / Equal Lows
             liq_events       => 1,  # Sweeps, Grabs, Runs
+            # --- Fase 2: Volumen y VWAP ---
+            volume_profile   => 1,  # Perfil de Volumen (POC / VAH / VAL)
+            vp_histogram     => 1,  # Histograma horizontal del VP
+            vp_poc           => 1,  # Línea POC
+            vp_va            => 1,  # Líneas VAH / VAL
+            anchored_vwap    => 1,  # VWAP Multi-Pivot Anclado
+            vwap_markers     => 1,  # Marcadores de ancla del VWAP
+            vwap_labels      => 1,  # Etiquetas de valor VWAP
         },
         _sidebar_buttons => {},     # refs a widgets de botón para actualizar su estado
     };
@@ -73,6 +83,8 @@ sub new {
     $self->{liquidity_overlay} = Market::Overlays::Liquidity->new(canvas => $self->{price_canvas});
     $self->{smc_overlay}       = Market::Overlays::SMC_Structures->new(canvas => $self->{price_canvas});
     $self->{zigzag_overlay}    = Market::Overlays::ZigZag_Trend->new(canvas => $self->{price_canvas});
+    $self->{vp_overlay}        = Market::Overlays::Volume_Profile->new(canvas => $self->{price_canvas});
+    $self->{vwap_overlay}      = Market::Overlays::Anchored_VWAP->new(canvas => $self->{price_canvas});
     $self->bind_events();
     $self->_build_sidebar($args{sidebar}) if defined $args{sidebar};
     return $self;
@@ -165,6 +177,44 @@ sub render {
     # ========================================================
     my $zz_slice = $self->{indicators}->slice_array('ZigZag_Trend', $start, $end);
     $self->{zigzag_overlay}->render($scale, $zz_slice, $start, $vis);
+
+    # ========================================================
+    # Overlay Volume Profile (Fase 2 — Sección 7)
+    # Cálculo lazy restringido a la ventana visible + contexto
+    # ========================================================
+    if ($vis->{volume_profile} // 1) {
+        my $vp_ind = $self->{indicators}->get('Volume_Profile') if $self->{indicators}->can('get');
+        # Recuperar el indicador directamente desde el manager
+        my $vp_indicator = $self->{indicators}{indicators}{'Volume_Profile'};
+        if (defined $vp_indicator) {
+            # Obtener los datos SMC para el modo bos_choch
+            my $full_smc = $self->{indicators}->get('SMC_Structures');
+            $vp_indicator->calculate_for_window(
+                $self->{market_data}, $start, $end, $full_smc
+            );
+            $self->{vp_overlay}->render($scale, $vp_indicator, $start, $vis);
+        }
+    } else {
+        $self->{price_canvas}->delete('vp_overlay');
+    }
+
+    # ========================================================
+    # Overlay Anchored VWAP Multi-Pivot (Fase 2 — Sección 8)
+    # ========================================================
+    if ($vis->{anchored_vwap} // 1) {
+        my $vwap_indicator = $self->{indicators}{indicators}{'Anchored_VWAP'};
+        if (defined $vwap_indicator) {
+            my $full_smc  = $self->{indicators}->get('SMC_Structures');
+            my $vp_ind    = $self->{indicators}{indicators}{'Volume_Profile'};
+            my $vp_profs  = defined $vp_ind ? $vp_ind->get_profiles() : [];
+            $vwap_indicator->calculate_for_window(
+                $self->{market_data}, $start, $end, $full_smc, $vp_profs
+            );
+            $self->{vwap_overlay}->render($scale, $vwap_indicator, $start, $vis);
+        }
+    } else {
+        $self->{price_canvas}->delete('vwap_overlay');
+    }
 
     # Panel Secundario (ATR)
     my $atr_width  = $self->{atr_canvas}->width;
@@ -1028,6 +1078,19 @@ sub _build_sidebar {
     $make_toggle->('ssl',              'DN  Sell-Side (SSL)');
     $make_toggle->('eqh_eql',         'EQ  EQH / EQL');
     $make_toggle->('liq_events',       'SW  Sweeps / Grabs');
+
+    # ── Sección: Volume Profile (Fase 2) ─────────────────────
+    $sep->('Perfil de Volumen');
+    $make_toggle->('volume_profile',   'VP  Vol Profile ON/OFF');
+    $make_toggle->('vp_histogram',     '::  Histograma VP');
+    $make_toggle->('vp_poc',           'PC  Línea POC');
+    $make_toggle->('vp_va',            'VA  VAH / VAL');
+
+    # ── Sección: Anchored VWAP (Fase 2) ──────────────────────
+    $sep->('VWAP Anclado');
+    $make_toggle->('anchored_vwap',    'VW  VWAP ON/OFF');
+    $make_toggle->('vwap_markers',     'MM  Marcadores Ancla');
+    $make_toggle->('vwap_labels',      'LL  Etiquetas VWAP');
 
     # ── Sección: Replay ──────────────────────────────────────
     $sep->('Replay');

@@ -151,6 +151,36 @@ use Market::Indicators::ZigZag_Trend;
 $indicators->register('ZigZag_Trend', Market::Indicators::ZigZag_Trend->new(prd => 2));
 
 # ==============================================================================
+# Fase 2: Infraestructura Analítica de Volumen y VWAP
+# ==============================================================================
+
+# Perfil de Volumen Avanzado (Sección 7)
+# mode: 'session' | 'bos_choch' | 'historical'
+use Market::Indicators::Volume_Profile;
+$indicators->register('Volume_Profile',
+    Market::Indicators::Volume_Profile->new(
+        mode           => 'session',  # Reinicio en cada nueva sesión
+        price_levels   => 100,        # Resolución de cuadrícula de precio
+        value_area_pct => 0.70,       # 70% del volumen para el Value Area
+        context_bars   => 500,        # Ventana de contexto indexado (Sección 2)
+    )
+);
+
+# VWAP Multi-Pivot Anclado (Sección 8)
+# Todos los disparadores habilitados por defecto
+use Market::Indicators::Anchored_VWAP;
+$indicators->register('Anchored_VWAP',
+    Market::Indicators::Anchored_VWAP->new(
+        anchor_session     => 1,  # Disparador 1: Inicio de Sesión
+        anchor_market_open => 1,  # Disparador 2: Apertura oficial de mercado
+        anchor_bos         => 1,  # Disparador 3: Break of Structure confirmado
+        anchor_choch       => 1,  # Disparador 4: Change of Character confirmado
+        anchor_poc         => 1,  # Disparador 5: POC del Volume Profile
+        context_bars       => 500,
+    )
+);
+
+# ==============================================================================
 # DEPURACIÓN: Verificar detección de BOS y CHOCH
 # ==============================================================================
 print "\n--- DEPURACION: Estructuras SMC ---\n";
