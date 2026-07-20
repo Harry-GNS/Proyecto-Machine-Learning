@@ -6,6 +6,13 @@ use POSIX qw(floor);
 
 use Market::MarketData;
 
+# Indicators
+use Market::Indicators::ATR;
+use Market::Indicators::Volume_Profile;
+use Market::Indicators::Anchored_VWAP;
+use Market::Indicators::Liquidity;
+use Market::Indicators::SMC_Structures;
+
 sub new {
     my ($class, %args) = @_;
     my $self = {
@@ -25,8 +32,17 @@ sub new {
         liquidity_levels => [],
         fibonacci_levels => [],
 
-        vp => Market::Indicators::VolumeProfile->new(market_data => $args{market_data}),
-        avwap => Market::Indicators::AnchoredVWAP->new(market_data => $args{market_data}),
+        indicators => {
+
+        vp => Market::Indicators::Volume_Profile->new(
+            market_data => $args{market_data}
+        ),
+
+        avwap => Market::Indicators::Anchored_VWAP->new(
+            market_data => $args{market_data}
+        ),
+
+    },
     };
     bless $self, $class;
     return $self;
