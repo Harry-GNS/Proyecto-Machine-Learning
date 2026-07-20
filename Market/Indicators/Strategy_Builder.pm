@@ -357,8 +357,14 @@ sub new {
 sub reset { my ($self) = @_; $self->{buckets} = {}; $self->{last_profile} = {}; }
 
 sub update_on_new_candle {
-    my ($self, $md, $idx) = @_;
-    # no-op: Profile computation is explicit via compute_profile
+    my ($self, $candle) = @_;
+
+    return unless defined $candle;
+
+    # actualizar bins
+    # recalcular POC
+    # recalcular VAH
+    # recalcular VAL
 }
 
 sub compute_profile {
@@ -478,6 +484,16 @@ sub update_on_new_candle {
     }
 }
 
-sub export { return shift->{last_values} }
+sub export {
 
+    my ($self) = @_;
+
+    return {
+        bins => $self->{bins},
+        poc  => $self->{poc},
+        vah  => $self->{vah},
+        val  => $self->{val},
+    };
+
+}
 1;

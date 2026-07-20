@@ -32,7 +32,12 @@ sub new {
     my $self = {
         # --- Parámetros configurables ---
         mode         => $args{mode}         // 'session', # session|bos_choch|historical
-        price_levels => $args{price_levels} // 100,       # resolución de la cuadrícula de precio
+        price_levels => (
+            defined $args{price_levels}
+            && $args{price_levels} > 5
+        )
+        ? $args{price_levels}
+        : 100,
         value_area_pct => $args{value_area_pct} // 0.70,  # 70% para VA por defecto
         context_bars => $args{context_bars} // 500,       # ventana de contexto indexado
 
@@ -72,12 +77,15 @@ sub update_last {
 
 sub calculate_batch {
     my ($self, $market_data) = @_;
+
+    return unless defined $market_data;
+
     $self->_calculate_full($market_data);
 }
 
 sub get_values {
     my ($self) = @_;
-    return $self->{data};
+    return [ @{ $self->{data} } ];
 }
 
 # Entrada de punto de consulta para el Overlay: recalcula perfiles si la ventana cambió.
@@ -99,7 +107,13 @@ sub calculate_for_window {
 }
 
 # Acceso directo a los perfiles calculados para el Overlay
-sub get_profiles { return $_[0]->{profiles}; }
+sub get_profiles {
+
+    my ($self)=@_;
+
+    return [ @{ $self->{profiles} } ];
+
+}
 
 # =============================================================================
 # LÓGICA INTERNA: Cálculo completo sobre todos los datos (para calculate_batch)
@@ -250,6 +264,7 @@ sub _compute_and_push_profile {
     my $tick_size = ($range_max - $range_min) / $levels;
     my @histogram = (0) x $levels;  # volumen acumulado por nivel de precio
     my $total_vol = 0;
+    return if $levels <= 0;
 
     for my $i ($start_idx .. $end_idx) {
         my $c = $market_data->get_candle($i);
