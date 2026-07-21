@@ -97,8 +97,8 @@ sub _draw_y_scale {
     $canvas->createRectangle(
         $chart_end_x, 0, 
         $self->{width}, $self->{height},
-        -fill    => '#131722',
-        -outline => '#2a2e39',
+        -fill    => '#F8F9FD',
+        -outline => '#E0E3EB',
         -tags    => 'y_scale'
     );
     
@@ -129,11 +129,11 @@ sub _draw_y_scale {
         # Formateo estricto a 2 decimales (.00)
         my $display_val = sprintf("%.2f", $val);
         
-        # Línea de cuadrícula horizontal sutil estilo TradingView
+        # Línea de cuadrícula horizontal sutil en Light Mode
         $canvas->createLine(
             0, $y_pos,
             $chart_end_x, $y_pos,
-            -fill => '#1e222d',
+            -fill => '#E5E7EB',
             -dash => '.',
             -tags => 'y_scale'
         );
@@ -141,7 +141,7 @@ sub _draw_y_scale {
         $canvas->createLine(
             $chart_end_x, $y_pos, 
             $chart_end_x + 5, $y_pos,
-            -fill => '#4a4f66',
+            -fill => '#BEC1CC',
             -tags => 'y_scale'
         );
         
@@ -149,7 +149,7 @@ sub _draw_y_scale {
             $self->{width} - 5, $y_pos, 
             -text   => $display_val, 
             -anchor => 'e', 
-            -fill   => '#d1d4dc', 
+            -fill   => '#2A2E39', 
             -font   => ['Helvetica', 9],
             -tags   => 'y_scale' 
         );

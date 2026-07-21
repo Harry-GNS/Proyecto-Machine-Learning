@@ -25,7 +25,7 @@ sub new {
 }
 
 sub render {
-    my ($self, $scale, $zz_slice, $start_idx_viewport, $visibility) = @_;
+    my ($self, $scale, $zz_slice, $start_idx_viewport, $visibility, $atr_slice) = @_;
     my $c = $self->{canvas};
 
     $c->delete('zigzag_overlay');
@@ -48,10 +48,7 @@ sub render {
     my $candle_width = $width / $visible_bars;
 
     # -------------------------------------------------------------------------
-    # 1. Recopilar todos los segmentos visibles a partir de la última barra
-    #    que tenga datos de segmentos.
-    #    Tomamos el snapshot de la última barra visible: contiene todos los
-    #    tramos completados + el tramo activo (repaint).
+    # 1. Recopilar todos los segmentos visibles
     # -------------------------------------------------------------------------
     my $last_data = undef;
     for my $i (reverse 0 .. $#$zz_slice) {
@@ -62,7 +59,6 @@ sub render {
     }
     return unless defined $last_data;
 
-    # Tramos completados + tramo activo (si existe)
     my @all_segments = @{ $last_data->{segments} // [] };
     push @all_segments, $last_data->{active_segment}
         if defined $last_data->{active_segment};
@@ -70,6 +66,8 @@ sub render {
     # -------------------------------------------------------------------------
     # 2. Dibujar cada segmento del ZigZag como una línea
     # -------------------------------------------------------------------------
+    my $show_channels = $visibility->{auto_channels} // 1;
+
     for my $seg (@all_segments) {
         next unless defined $seg->{from_bar} && defined $seg->{to_bar};
         next unless defined $seg->{from_price} && defined $seg->{to_price};
@@ -81,27 +79,63 @@ sub render {
         my $x1 = ($rel_from - $offset_frac) * $candle_width + ($candle_width / 2);
         my $x2 = ($rel_to   - $offset_frac) * $candle_width + ($candle_width / 2);
 
-        my $y1 = $height - ((($seg->{from_price} - $min_val) / $range) * $height);
-        my $y2 = $height - ((($seg->{to_price}   - $min_val) / $range) * $height);
-
         # Saltar segmentos completamente fuera de la pantalla
         next if ($x1 < 0 && $x2 < 0) || ($x1 > $width && $x2 > $width);
+
+        my $y1 = $height - ((($seg->{from_price} - $min_val) / $range) * $height);
+        my $y2 = $height - ((($seg->{to_price}   - $min_val) / $range) * $height);
 
         my $color = ($seg->{direction} // '') eq 'bullish'
             ? $self->{color_bullish}
             : $self->{color_bearish};
 
+        # Dibujar línea del canal central (ZigZag)
         $c->createLine(
             $x1, $y1, $x2, $y2,
             -fill  => $color,
             -width => $self->{line_width},
             -tags  => ['zigzag_overlay'],
         );
+
+        # Dibujar Canales Automáticos paralelos (desplazados por 2 * ATR)
+        if ($show_channels) {
+            # Obtener el ATR correspondiente
+            my $atr = 0;
+            if (defined $atr_slice && $rel_from >= 0 && $rel_from < @$atr_slice && defined $atr_slice->[$rel_from]) {
+                $atr = $atr_slice->[$rel_from];
+            }
+            # Fallback si no hay ATR (ej: principio de los datos)
+            $atr ||= abs($seg->{to_price} - $seg->{from_price}) * 0.15;
+            $atr ||= 15.0; # valor de resguardo absoluto mínimo
+
+            my $y1_upper = $height - ((($seg->{from_price} + 2 * $atr - $min_val) / $range) * $height);
+            my $y2_upper = $height - ((($seg->{to_price}   + 2 * $atr - $min_val) / $range) * $height);
+
+            my $y1_lower = $height - ((($seg->{from_price} - 2 * $atr - $min_val) / $range) * $height);
+            my $y2_lower = $height - ((($seg->{to_price}   - 2 * $atr - $min_val) / $range) * $height);
+
+            # Canal Superior
+            $c->createLine(
+                $x1, $y1_upper, $x2, $y2_upper,
+                -fill  => '#9CA3AF',
+                -dash  => '-',
+                -width => 1,
+                -tags  => ['zigzag_overlay'],
+            );
+
+            # Canal Inferior
+            $c->createLine(
+                $x1, $y1_lower, $x2, $y2_lower,
+                -fill  => '#9CA3AF',
+                -dash  => '-',
+                -width => 1,
+                -tags  => ['zigzag_overlay'],
+            );
+        }
     }
 
     # -------------------------------------------------------------------------
     # 3. Dibujar marcadores en los pivotes confirmados de la última barra visible
-    #    (pequeños círculos en los extremos)
     # -------------------------------------------------------------------------
     my $last_bar_data = $zz_slice->[-1];
     if (defined $last_bar_data) {

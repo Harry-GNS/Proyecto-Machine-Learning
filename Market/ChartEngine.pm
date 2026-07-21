@@ -14,6 +14,7 @@ use Market::Overlays::SMC_Structures;
 use Market::Overlays::ZigZag_Trend;
 use Market::Overlays::Volume_Profile;
 use Market::Overlays::Anchored_VWAP;
+use Market::Overlays::Fibonacci;
 sub new {
     my ($class, %args) = @_;
     
@@ -54,9 +55,14 @@ sub new {
         # 1 = visible, 0 = oculto. El overlay comprueba la clave antes de dibujar.
         visibility => {
             zigzag           => 1,  # ZigZag (LonesomeTheBlue)
+            zigzag_external  => 1,  # External ZigZag
+            fibonacci        => 1,  # Fibonacci retracements
+            auto_channels    => 1,  # Canales automaticos
             bos_choch        => 1,  # Rupturas de Estructura (BOS / CHOCH)
             structure_labels => 1,  # Etiquetas HH / HL / LH / LL
             fvg              => 1,  # Fair Value Gaps
+            swing_ob         => 1,  # Swing Order Blocks
+            internal_ob      => 1,  # Internal Order Blocks
             bsl              => 1,  # Buy-Side Liquidity
             ssl              => 1,  # Sell-Side Liquidity
             eqh_eql          => 1,  # Equal Highs / Equal Lows
@@ -83,7 +89,21 @@ sub new {
     $self->{liquidity_overlay} = Market::Overlays::Liquidity->new(canvas => $self->{price_canvas});
     $self->{smc_overlay}       = Market::Overlays::SMC_Structures->new(canvas => $self->{price_canvas});
     $self->{zigzag_overlay}    = Market::Overlays::ZigZag_Trend->new(canvas => $self->{price_canvas});
-    $self->{vp_overlay}        = Market::Overlays::Volume_Profile->new(canvas => $self->{price_canvas});
+    
+    $self->{zigzag_external_overlay} = Market::Overlays::ZigZag_Trend->new(
+        canvas         => $self->{price_canvas},
+        line_width     => 3,
+        color_bullish  => '#00796B',
+        color_bearish  => '#C2185B',
+    );
+    
+    $self->{fibonacci_overlay} = Market::Overlays::Fibonacci->new(canvas => $self->{price_canvas});
+    
+    $self->{vp_overlay}        = Market::Overlays::Volume_Profile->new(
+        canvas         => $self->{price_canvas},
+        color_hist_va  => '#BBDEFB', # Azul claro para light mode
+        color_hist_out => '#E0E3EB', # Gris claro para light mode
+    );
     $self->{vwap_overlay}      = Market::Overlays::Anchored_VWAP->new(canvas => $self->{price_canvas});
     $self->bind_events();
     $self->_build_sidebar($args{sidebar}) if defined $args{sidebar};
@@ -176,7 +196,18 @@ sub render {
     # Overlay ZigZag (LonesomeTheBlue port)
     # ========================================================
     my $zz_slice = $self->{indicators}->slice_array('ZigZag_Trend', $start, $end);
-    $self->{zigzag_overlay}->render($scale, $zz_slice, $start, $vis);
+    $self->{zigzag_overlay}->render($scale, $zz_slice, $start, $vis, $atr_slice);
+
+    # Renderizar ZigZag Externo
+    my $zz_ext_slice = $self->{indicators}->slice_array('ZigZag_Trend_External', $start, $end);
+    if ($self->{zigzag_external_overlay}) {
+        $self->{zigzag_external_overlay}->render($scale, $zz_ext_slice, $start, { zigzag => $vis->{zigzag_external}, auto_channels => 0 });
+    }
+
+    # Renderizar Retroceso de Fibonacci (basado en el ZigZag Externo)
+    if ($self->{fibonacci_overlay}) {
+        $self->{fibonacci_overlay}->render($scale, $zz_ext_slice, $start, $vis);
+    }
 
     # ========================================================
     # Overlay Volume Profile (Fase 2 — Sección 7)
@@ -516,7 +547,7 @@ sub _on_drag_start {
 sub _on_drag_motion {
     my ($self, $x, $y) = @_;
     
-    if ($self->{drag_mode} eq 'vertical') {
+    if (defined $self->{drag_mode} && $self->{drag_mode} eq 'vertical') {
         # =============================================
         # LÓGICA DE ESTIRAMIENTO VERTICAL (ZOOM Y)
         # =============================================
@@ -953,7 +984,7 @@ sub toggle_smc {
     my ($self) = @_;
     $self->{show_smc} = $self->{show_smc} ? 0 : 1;
     # Sincronizar con los flags individuales de SMC en visibility
-    for my $key (qw(bos_choch structure_labels fvg)) {
+    for my $key (qw(bos_choch structure_labels fvg swing_ob internal_ob)) {
         $self->{visibility}{$key} = $self->{show_smc};
         if (my $btn = $self->{_sidebar_buttons}{$key}) {
             $self->_update_button_state($btn, $self->{show_smc});
@@ -980,6 +1011,18 @@ sub toggle_visibility {
     return $new_val;
 }
 
+sub disable_all_indicators {
+    my ($self) = @_;
+    for my $key (keys %{$self->{visibility}}) {
+        $self->{visibility}{$key} = 0;
+        if (my $btn = $self->{_sidebar_buttons}{$key}) {
+            $self->_update_button_state($btn, 0);
+        }
+    }
+    $self->{show_smc} = 0;
+    $self->request_render();
+}
+
 # _update_button_state: actualiza el color del botón según su estado on/off.
 sub _update_button_state {
     my ($self, $btn, $is_on) = @_;
@@ -987,13 +1030,13 @@ sub _update_button_state {
         $btn->configure(-bg => '#2962FF', -fg => '#FFFFFF',
                         -activebackground => '#1E4FD8');
     } else {
-        $btn->configure(-bg => '#2A2E39', -fg => '#6B7280',
-                        -activebackground => '#383D4A');
+        $btn->configure(-bg => '#E0E3EB', -fg => '#2A2E39',
+                        -activebackground => '#BEC1CC');
     }
 }
 
 # =============================================================================
-# BARRA LATERAL DE CONTROLES (estilo VS Code)
+# BARRA LATERAL DE CONTROLES (estilo VS Code - Lado Light)
 # =============================================================================
 # Recibe un Frame de Tk ya creado en market.pl y lo popula con botones toggle.
 # Cada sección agrupa controles relacionados con una etiqueta separadora.
@@ -1001,12 +1044,12 @@ sub _build_sidebar {
     my ($self, $sidebar) = @_;
     return unless defined $sidebar;
 
-    my $bg_panel  = '#1A1E2E';   # fondo del panel
+    my $bg_panel  = '#F8F9FD';   # fondo del panel (light gray)
     my $bg_on     = '#2962FF';   # botón activo  (azul TradingView)
-    my $bg_off    = '#2A2E39';   # botón inactivo
+    my $bg_off    = '#E0E3EB';   # botón inactivo (light gray)
     my $fg_on     = '#FFFFFF';
-    my $fg_off    = '#6B7280';
-    my $fg_label  = '#4B5563';
+    my $fg_off    = '#2A2E39';
+    my $fg_label  = '#888D99';
     my $btn_font  = 'Helvetica 9';
     my $lbl_font  = 'Helvetica 8';
 
@@ -1019,7 +1062,7 @@ sub _build_sidebar {
             -text => $text, -bg => $bg_panel, -fg => $fg_label,
             -font => $lbl_font, -anchor => 'w',
         )->pack(-fill => 'x', -padx => 6, -pady => [10, 2]);
-        $sidebar->Frame(-bg => '#2D3245', -height => 1)
+        $sidebar->Frame(-bg => '#E0E3EB', -height => 1)
             ->pack(-fill => 'x', -padx => 4, -pady => [0, 4]);
     };
 
@@ -1032,7 +1075,7 @@ sub _build_sidebar {
             -text             => $label,
             -bg               => $is_on ? $bg_on : $bg_off,
             -fg               => $is_on ? $fg_on : $fg_off,
-            -activebackground => $is_on ? '#1E4FD8' : '#383D4A',
+            -activebackground => $is_on ? '#1E4FD8' : '#BEC1CC',
             -activeforeground => '#FFFFFF',
             -relief           => 'flat',
             -anchor           => 'w',
@@ -1052,8 +1095,8 @@ sub _build_sidebar {
         $sidebar->Button(
             -text             => $label,
             -bg               => $bg_off,
-            -fg               => '#D1D4DC',
-            -activebackground => '#383D4A',
+            -fg               => '#2A2E39',
+            -activebackground => '#BEC1CC',
             -activeforeground => '#FFFFFF',
             -relief           => 'flat',
             -anchor           => 'w',
@@ -1065,12 +1108,21 @@ sub _build_sidebar {
         )->pack(-fill => 'x', -padx => 4, -pady => 1);
     };
 
+    # ── Sección: Controles Generales ─────────────────────────
+    $sep->('Controles');
+    $make_action->('✖ Desactivar Todo', sub { $self->disable_all_indicators() });
+
     # ── Sección: Estructura de Mercado ───────────────────────
     $sep->('Estructura');
     $make_toggle->('zigzag',           'ZZ  ZigZag');
+    $make_toggle->('zigzag_external',  'ZE  ZZ Externo');
+    $make_toggle->('fibonacci',        'FB  Fibonacci');
+    $make_toggle->('auto_channels',    'AC  Auto Channels');
     $make_toggle->('bos_choch',        'BB  BOS / CHOCH');
     $make_toggle->('structure_labels', 'HH  HH / HL / LH / LL');
     $make_toggle->('fvg',              'FV  Fair Value Gap');
+    $make_toggle->('swing_ob',         'SO  Swing OB');
+    $make_toggle->('internal_ob',      'IO  Internal OB');
 
     # ── Sección: Liquidez ────────────────────────────────────
     $sep->('Liquidez');

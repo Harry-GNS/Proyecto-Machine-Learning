@@ -33,48 +33,48 @@ my $engine;
 # ==============================================================================
 # NUEVO: Barra de Herramientas Estilo TradingView (Timeframes y Replay)
 # ==============================================================================
-my $toolbar = $mw->Frame(-bg => '#131722')->pack(-fill => 'x', -side => 'top');
+my $toolbar = $mw->Frame(-bg => '#F8F9FD')->pack(-fill => 'x', -side => 'top');
 
 # 1. Bloque de Temporalidades
-my $tf_frame = $toolbar->Frame(-bg => '#131722')->pack(-side => 'left', -padx => 10, -pady => 5);
+my $tf_frame = $toolbar->Frame(-bg => '#F8F9FD')->pack(-side => 'left', -padx => 10, -pady => 5);
 my @timeframes = ('1m', '5m', '15m', '1h', '2h', '4h', 'D', 'W');
 foreach my $tf (@timeframes) {
     $tf_frame->Button(
         -text => $tf, 
         -command => sub { $engine->set_timeframe($tf) },
-        -bg => '#2A2E39', -fg => '#d1d4dc', -activebackground => '#2962FF', -relief => 'flat', -font => 'Helvetica 9'
+        -bg => '#E0E3EB', -fg => '#2A2E39', -activebackground => '#2962FF', -activeforeground => '#FFFFFF', -relief => 'flat', -font => 'Helvetica 9'
     )->pack(-side => 'left', -padx => 1);
 }
 
 # Separador Visual
-$toolbar->Label(-text => '|', -bg => '#131722', -fg => '#363c4e')->pack(-side => 'left', -padx => 5);
+$toolbar->Label(-text => '|', -bg => '#F8F9FD', -fg => '#BEC1CC')->pack(-side => 'left', -padx => 5);
 
 # 2. Bloque Controles del Sistema Replay 
-my $replay_frame = $toolbar->Frame(-bg => '#131722')->pack(-side => 'left', -padx => 5);
+my $replay_frame = $toolbar->Frame(-bg => '#F8F9FD')->pack(-side => 'left', -padx => 5);
 
 $replay_frame->Button(-text => '✂ Inicio Replay', -command => sub { $engine->enable_replay_selection() }, 
     -bg => '#2962FF', -fg => 'white', -relief => 'flat', -font => 'Helvetica 9 bold')->pack(-side => 'left', -padx => 2);
 
 $replay_frame->Button(-text => '⏮ Step Back', -command => sub { $engine->step_replay(-1) }, 
-    -bg => '#2A2E39', -fg => '#d1d4dc', -relief => 'flat')->pack(-side => 'left', -padx => 2);
+    -bg => '#E0E3EB', -fg => '#2A2E39', -activebackground => '#BEC1CC', -relief => 'flat')->pack(-side => 'left', -padx => 2);
 
 $replay_frame->Button(-text => '▶ Play', -command => sub { $engine->play_replay() }, 
-    -bg => '#2A2E39', -fg => '#d1d4dc', -relief => 'flat')->pack(-side => 'left', -padx => 2);
+    -bg => '#E0E3EB', -fg => '#2A2E39', -activebackground => '#BEC1CC', -relief => 'flat')->pack(-side => 'left', -padx => 2);
 
 $replay_frame->Button(-text => '⏸ Pause', -command => sub { $engine->pause_replay() }, 
-    -bg => '#2A2E39', -fg => '#d1d4dc', -relief => 'flat')->pack(-side => 'left', -padx => 2);
+    -bg => '#E0E3EB', -fg => '#2A2E39', -activebackground => '#BEC1CC', -relief => 'flat')->pack(-side => 'left', -padx => 2);
 
 $replay_frame->Button(-text => '⏭ Step Fwd', -command => sub { $engine->step_replay(1) }, 
-    -bg => '#2A2E39', -fg => '#d1d4dc', -relief => 'flat')->pack(-side => 'left', -padx => 2);
+    -bg => '#E0E3EB', -fg => '#2A2E39', -activebackground => '#BEC1CC', -relief => 'flat')->pack(-side => 'left', -padx => 2);
 
 $replay_frame->Button(-text => '⏩ Fast Fwd', -command => sub { $engine->fast_forward_replay() }, 
-    -bg => '#2A2E39', -fg => '#d1d4dc', -relief => 'flat')->pack(-side => 'left', -padx => 2);
+    -bg => '#E0E3EB', -fg => '#2A2E39', -activebackground => '#BEC1CC', -relief => 'flat')->pack(-side => 'left', -padx => 2);
 
 $replay_frame->Button(-text => '✖ Exit Replay', -command => sub { $engine->stop_replay() }, 
     -bg => '#F23645', -fg => 'white', -relief => 'flat', -font => 'Helvetica 9')->pack(-side => 'left', -padx => 10);
 
 # Separador Visual
-$toolbar->Label(-text => '|', -bg => '#131722', -fg => '#363c4e')->pack(-side => 'left', -padx => 5);
+$toolbar->Label(-text => '|', -bg => '#F8F9FD', -fg => '#BEC1CC')->pack(-side => 'left', -padx => 5);
 
 # 3. Bloque Herramientas de Escala
 my $modo_texto = "Modo: Automatico";
@@ -84,7 +84,7 @@ $toolbar->Button(
         my $es_auto = $engine->toggle_auto_scale();
         $modo_texto = $es_auto ? "Modo: Automatico" : "Modo: Manual";
     },
-    -bg => '#2A2E39', -fg => '#d1d4dc', -relief => 'flat'
+    -bg => '#E0E3EB', -fg => '#2A2E39', -activebackground => '#BEC1CC', -relief => 'flat'
 )->pack(-side => 'left', -padx => 5);
 
 $toolbar->Button(
@@ -93,13 +93,13 @@ $toolbar->Button(
         $engine->reset_view(); 
         $modo_texto = "Modo: Automatico"; 
     },
-    -bg => '#2A2E39', -fg => '#d1d4dc', -relief => 'flat'
+    -bg => '#E0E3EB', -fg => '#2A2E39', -activebackground => '#BEC1CC', -relief => 'flat'
 )->pack(-side => 'left', -padx => 5);
 
 # ==============================================================================
 # NUEVO: Bloque de Visibilidad de Capas Analíticas (SMC)
 # ==============================================================================
-$toolbar->Label(-text => '|', -bg => '#131722', -fg => '#363c4e')->pack(-side => 'left', -padx => 5);
+$toolbar->Label(-text => '|', -bg => '#F8F9FD', -fg => '#BEC1CC')->pack(-side => 'left', -padx => 5);
 
 my $smc_texto = "SMC: VISIBLE";
 $toolbar->Button(
@@ -108,25 +108,23 @@ $toolbar->Button(
         my $visible = $engine->toggle_smc();
         $smc_texto = $visible ? "SMC: VISIBLE" : "SMC: OCULTO";
     },
-    -bg => '#2A2E39', -fg => '#d1d4dc', -activebackground => '#2962FF', -relief => 'flat', -font => 'Helvetica 9 bold'
+    -bg => '#E0E3EB', -fg => '#2A2E39', -activebackground => '#2962FF', -activeforeground => '#FFFFFF', -relief => 'flat', -font => 'Helvetica 9 bold'
 )->pack(-side => 'left', -padx => 5);
 
 # Layout principal: barra lateral izquierda + canvases
-# El sidebar se crea AQUI (para que pack() lo posicione antes que los canvases)
-# y se POPULA desde ChartEngine::_build_sidebar().
-my $main_frame = $mw->Frame(-bg => '#131722')
+my $main_frame = $mw->Frame(-bg => '#FFFFFF')
     ->pack(-side => 'top', -fill => 'both', -expand => 1);
 
-my $sidebar = $main_frame->Frame(-bg => '#1A1E2E', -width => 168)
+my $sidebar = $main_frame->Frame(-bg => '#F8F9FD', -width => 168)
     ->pack(-side => 'left', -fill => 'y');
 $sidebar->packPropagate(0);   # mantener el ancho fijo aunque los hijos sean pequeños
 
-my $charts_frame = $main_frame->Frame(-bg => '#131722')
+my $charts_frame = $main_frame->Frame(-bg => '#FFFFFF')
     ->pack(-side => 'right', -fill => 'both', -expand => 1);
 
-my $price_canvas = $charts_frame->Canvas(-bg => '#131722', -height => 600)
+my $price_canvas = $charts_frame->Canvas(-bg => '#FFFFFF', -height => 600)
     ->pack(-fill => 'both', -expand => 1);
-my $atr_canvas   = $charts_frame->Canvas(-bg => '#131722', -height => 200)
+my $atr_canvas   = $charts_frame->Canvas(-bg => '#FFFFFF', -height => 200)
     ->pack(-fill => 'x');
 
 # ==============================================================================
@@ -149,6 +147,7 @@ $indicators->register('SMC_Structures', Market::Indicators::SMC_Structures->new(
 # Registrar el detector de tendencia ZigZag macro (ChartPrime port, MPL-2.0)
 use Market::Indicators::ZigZag_Trend;
 $indicators->register('ZigZag_Trend', Market::Indicators::ZigZag_Trend->new(prd => 2));
+$indicators->register('ZigZag_Trend_External', Market::Indicators::ZigZag_Trend->new(prd => 12));
 
 # ==============================================================================
 # Fase 2: Infraestructura Analítica de Volumen y VWAP
@@ -199,36 +198,86 @@ for my $i (0 .. $#$smc_data) {
 print "--- FIN DE DEPURACION ---\n\n";
 
 # ==============================================================================
-# 3. Lectura y Carga de Datos (CSV) [cite: 610]
+# 3. Lectura y Carga de Datos (PostgreSQL 'fedora' con Fallback a CSV) [cite: 610]
 # ==============================================================================
-my $csv_file = $FindBin::Bin . '/Data/datos.csv'; # <-- CAMBIA ESTO AL NOMBRE EXACTO DE TU ARCHIVO
-
-print "Iniciando lectura de datos desde '$csv_file'...\n";
-open(my $fh, '<', $csv_file) or die "Error: No se pudo abrir el archivo CSV '$csv_file': $!\n";
-
-# Leer y descartar la primera línea si contiene las cabeceras (Timestamp, Open...)
-my $header = <$fh>; 
-
-while (my $line = <$fh>) {
-    chomp $line;
+my $db_loaded = 0;
+eval {
+    require DBI;
+    my @hosts_to_try = ("", "localhost", "10.255.255.254");
+    my $port = 5432;
+    my $user = 'postgres';
+    my $password = 'postgres';
+    my $dbname = 'fedora';
     
-    # Parsear las columnas (Ajustar el split a ';' si tu CSV está delimitado por punto y coma)
-    my ($ts, $open, $high, $low, $close, $volume) = split(/,/, $line);
+    my $dbh;
+    my $connected = 0;
+    foreach my $try_host (@hosts_to_try) {
+        eval {
+            print "Intentando conectar a base de datos '$dbname' en host '$try_host'...\n";
+            my $dsn = ($try_host eq "") 
+                ? "dbi:Pg:dbname=$dbname" 
+                : "dbi:Pg:dbname=$dbname;host=$try_host;port=$port";
+            $dbh = DBI->connect($dsn, $user, $password, {
+                RaiseError => 1, PrintError => 0, AutoCommit => 1
+            });
+            $connected = 1;
+        };
+        last if $connected;
+    }
     
-    # Invocar la entrada de datos asegurando que los valores se traten como números [cite: 610]
-    $market->add_candle({
-        timestamp => $ts,
-        open      => $open + 0,
-        high      => $high + 0,
-        low       => $low  + 0,
-        close     => $close + 0,
-        volume    => $volume + 0,
-    });
+    if ($connected) {
+        print "Conexion a PostgreSQL ('$dbname') establecida con exito.\n";
+        print "Cargando velas desde la tabla 'datos'...\n";
+        
+        my $sth = $dbh->prepare("SELECT time, open, high, low, close, volume FROM datos ORDER BY id ASC");
+        $sth->execute();
+        
+        while (my $row = $sth->fetchrow_hashref()) {
+            $market->add_candle({
+                timestamp => $row->{time},
+                open      => $row->{open} + 0,
+                high      => $row->{high} + 0,
+                low       => $row->{low} + 0,
+                close     => $row->{close} + 0,
+                volume    => $row->{volume} + 0,
+            });
+            $indicators->update_last($market);
+        }
+        $sth->finish();
+        $dbh->disconnect();
+        $db_loaded = 1;
+        print "Carga desde PostgreSQL completada con exito.\n";
+    }
+};
+
+if ($@ || !$db_loaded) {
+    print "Conexion a PostgreSQL fallida o no disponible. Detalles: $@" if $@;
+    print "Aplicando fallback: cargando datos desde CSV...\n";
     
-    # Invocar la actualización de indicadores en streaming (vela por vela) [cite: 612]
-    $indicators->update_last($market);
+    my $csv_file = $FindBin::Bin . '/Data/datos.csv';
+    print "Iniciando lectura de datos desde '$csv_file'...\n";
+    open(my $fh, '<', $csv_file) or die "Error: No se pudo abrir el archivo CSV '$csv_file': $!\n";
+    
+    # Leer y descartar la primera línea si contiene las cabeceras
+    my $header = <$fh>; 
+    
+    while (my $line = <$fh>) {
+        chomp $line;
+        my ($ts, $open, $high, $low, $close, $volume) = split(/,/, $line);
+        
+        $market->add_candle({
+            timestamp => $ts,
+            open      => $open + 0,
+            high      => $high + 0,
+            low       => $low  + 0,
+            close     => $close + 0,
+            volume    => $volume + 0,
+        });
+        
+        $indicators->update_last($market);
+    }
+    close($fh);
 }
-close($fh);
 
 print "Carga completada. Total de velas base: " . $market->size() . "\n";
 

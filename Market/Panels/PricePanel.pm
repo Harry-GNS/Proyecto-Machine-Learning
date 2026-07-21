@@ -32,7 +32,7 @@ sub _init_crosshair_objects {
     $self->{crosshair}->{ohlc_text} = $c->createText(
         10, 10,
         -text   => '',
-        -fill   => '#d1d4dc',
+        -fill   => '#131722',
         -anchor => 'nw',
         -font   => ['Helvetica', 10, 'bold']
     );
@@ -116,19 +116,9 @@ sub render_last_visible_price {
     my $price = $last_candle->{close};
     my $y_pos = $self->{scale}->value_to_y($price);
     my $width = $self->{scale}->{width};
-    my $chart_end_x = $self->{scale}->_drawable_width();
 
     my $color = ($price >= $last_candle->{open}) ? '#089981' : '#F23645';
     my $display_val = sprintf("%.2f", $price);
-
-    # Línea horizontal de último precio punteada estilo TradingView
-    $c->createLine(
-        0, $y_pos, $chart_end_x, $y_pos,
-        -fill  => $color,
-        -dash  => '.',
-        -width => 1,
-        -tags  => 'last_price_label'
-    );
 
     my $text_id = $c->createText(
         $width - 5, $y_pos,
@@ -156,11 +146,8 @@ sub draw_crosshair {
     if (!defined $x || !$s || !$self->{current_slice}) {
         if (exists $self->{crosshair}->{ohlc_text} && $self->{current_slice} && @{$self->{current_slice}}) {
             my $last = $self->{current_slice}->[-1];
-            my $change = $last->{close} - $last->{open};
-            my $pct = $last->{open} > 0 ? ($change / $last->{open}) * 100 : 0;
-            my $sign = $change >= 0 ? '+' : '';
-            my $ohlc_str = sprintf("NQ1! · 1m · TradingView   O: %.2f   H: %.2f   L: %.2f   C: %.2f   %s%.2f (%s%.2f%%)",
-                $last->{open}, $last->{high}, $last->{low}, $last->{close}, $sign, $change, $sign, $pct);
+            my $ohlc_str = sprintf("O: %.2f   H: %.2f   L: %.2f   C: %.2f",
+                $last->{open}, $last->{high}, $last->{low}, $last->{close});
             $c->itemconfigure($self->{crosshair}->{ohlc_text}, -text => $ohlc_str);
             $c->raise($self->{crosshair}->{ohlc_text});
         }
@@ -195,11 +182,8 @@ sub draw_crosshair {
         }
 
         if (exists $self->{crosshair}->{ohlc_text}) {
-            my $change = $hovered->{close} - $hovered->{open};
-            my $pct = $hovered->{open} > 0 ? ($change / $hovered->{open}) * 100 : 0;
-            my $sign = $change >= 0 ? '+' : '';
-            my $ohlc_str = sprintf("NQ1! · 1m · TradingView   O: %.2f   H: %.2f   L: %.2f   C: %.2f   %s%.2f (%s%.2f%%)",
-                $hovered->{open}, $hovered->{high}, $hovered->{low}, $hovered->{close}, $sign, $change, $sign, $pct);
+            my $ohlc_str = sprintf("O: %.2f   H: %.2f   L: %.2f   C: %.2f",
+                $hovered->{open}, $hovered->{high}, $hovered->{low}, $hovered->{close});
             $c->itemconfigure($self->{crosshair}->{ohlc_text}, -text => $ohlc_str);
         }
     }
@@ -338,13 +322,13 @@ sub draw_time_axis {
         if ($is_piv) {
             # Pivote: línea más brillante y sólida
             $c->createLine($x, 0, $x, $height,
-                -fill  => '#4a4f66',
+                -fill  => '#BEC1CC',
                 -width => 1,
                 -tags  => 'time_axis'
             );
         } else {
             $c->createLine($x, 0, $x, $height,
-                -fill => '#2a2e39',
+                -fill => '#E5E7EB',
                 -dash => '.',
                 -tags => 'time_axis'
             );
@@ -354,7 +338,7 @@ sub draw_time_axis {
         $c->createText(
             $x, $height - 10,
             -text   => $label,
-            -fill   => $is_piv ? '#ffffff' : '#d1d4dc',
+            -fill   => $is_piv ? '#131722' : '#6B7280',
             -anchor => 's',
             -font   => $is_piv ? ['Helvetica', 9, 'bold'] : ['Helvetica', 9],
             -tags   => 'time_axis'
@@ -389,7 +373,7 @@ sub draw_volume {
         my $x_right    = $s->index_to_x($i + 1) - 1;
         my $y_bottom   = $height - $bottom_padding;
         my $y_top      = $y_bottom - $bar_height;
-        my $color      = ($candle->{close} >= $candle->{open}) ? '#1d5c4d' : '#7a2524';
+        my $color      = ($candle->{close} >= $candle->{open}) ? '#80CBC4' : '#FFCDD2';
 
         $c->createRectangle($x_left, $y_top, $x_right, $y_bottom,
             -fill => $color, -outline => $color, -tags => 'volume');
