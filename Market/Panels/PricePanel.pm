@@ -116,9 +116,19 @@ sub render_last_visible_price {
     my $price = $last_candle->{close};
     my $y_pos = $self->{scale}->value_to_y($price);
     my $width = $self->{scale}->{width};
+    my $chart_end_x = $self->{scale}->_drawable_width();
 
     my $color = ($price >= $last_candle->{open}) ? '#089981' : '#F23645';
     my $display_val = sprintf("%.2f", $price);
+
+    # Línea horizontal de último precio punteada estilo TradingView
+    $c->createLine(
+        0, $y_pos, $chart_end_x, $y_pos,
+        -fill  => $color,
+        -dash  => '.',
+        -width => 1,
+        -tags  => 'last_price_label'
+    );
 
     my $text_id = $c->createText(
         $width - 5, $y_pos,
@@ -146,8 +156,11 @@ sub draw_crosshair {
     if (!defined $x || !$s || !$self->{current_slice}) {
         if (exists $self->{crosshair}->{ohlc_text} && $self->{current_slice} && @{$self->{current_slice}}) {
             my $last = $self->{current_slice}->[-1];
-            my $ohlc_str = sprintf("O: %.2f   H: %.2f   L: %.2f   C: %.2f",
-                $last->{open}, $last->{high}, $last->{low}, $last->{close});
+            my $change = $last->{close} - $last->{open};
+            my $pct = $last->{open} > 0 ? ($change / $last->{open}) * 100 : 0;
+            my $sign = $change >= 0 ? '+' : '';
+            my $ohlc_str = sprintf("NQ1! · 1m · TradingView   O: %.2f   H: %.2f   L: %.2f   C: %.2f   %s%.2f (%s%.2f%%)",
+                $last->{open}, $last->{high}, $last->{low}, $last->{close}, $sign, $change, $sign, $pct);
             $c->itemconfigure($self->{crosshair}->{ohlc_text}, -text => $ohlc_str);
             $c->raise($self->{crosshair}->{ohlc_text});
         }
@@ -182,8 +195,11 @@ sub draw_crosshair {
         }
 
         if (exists $self->{crosshair}->{ohlc_text}) {
-            my $ohlc_str = sprintf("O: %.2f   H: %.2f   L: %.2f   C: %.2f",
-                $hovered->{open}, $hovered->{high}, $hovered->{low}, $hovered->{close});
+            my $change = $hovered->{close} - $hovered->{open};
+            my $pct = $hovered->{open} > 0 ? ($change / $hovered->{open}) * 100 : 0;
+            my $sign = $change >= 0 ? '+' : '';
+            my $ohlc_str = sprintf("NQ1! · 1m · TradingView   O: %.2f   H: %.2f   L: %.2f   C: %.2f   %s%.2f (%s%.2f%%)",
+                $hovered->{open}, $hovered->{high}, $hovered->{low}, $hovered->{close}, $sign, $change, $sign, $pct);
             $c->itemconfigure($self->{crosshair}->{ohlc_text}, -text => $ohlc_str);
         }
     }

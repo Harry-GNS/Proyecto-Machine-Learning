@@ -79,7 +79,7 @@ sub render {
                 elsif ($state eq 'swing_low') {
                     $color = '#00E676';
                     if ($res eq 'active') { $text = 'SSL'; }
-                    elsif ($res eq 'sweep') { $text = 'SWEEP↓'; }
+                    elsif ($res eq 'sweep') { $text = 'SWEEP ↓'; }
                     elsif ($res eq 'grab') { $text = 'LQ GRAB'; $color = '#FF9100'; }
                     elsif ($res eq 'run') { $text = 'LQ RUN'; $color = '#2979FF'; }
                 }
@@ -93,7 +93,7 @@ sub render {
                 elsif ($state eq 'eql') {
                     $color = $self->{color_eql};
                     if ($res eq 'active') { $text = 'EQL'; }
-                    elsif ($res eq 'sweep') { $text = 'SWEEP↓'; }
+                    elsif ($res eq 'sweep') { $text = 'SWEEP ↓'; }
                     elsif ($res eq 'grab') { $text = 'LQ GRAB'; $color = '#FF9100'; }
                     elsif ($res eq 'run') { $text = 'LQ RUN'; $color = '#2979FF'; }
                 }
@@ -138,7 +138,7 @@ sub render {
                 }
                 elsif ($ev->{type} eq 'sweep_down') {
                     $c->createText($x_event, $y_event + 15,
-                        -text => 'SWEEP↓', -fill => '#00E676',
+                        -text => 'SWEEP ↓', -fill => '#00E676',
                         -font => 'Helvetica 9 bold', -tags => ['liquidity_overlay']);
                 }
                 elsif ($ev->{type} eq 'grab_up' || $ev->{type} eq 'grab_down') {

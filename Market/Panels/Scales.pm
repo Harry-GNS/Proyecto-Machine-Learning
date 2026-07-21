@@ -129,6 +129,15 @@ sub _draw_y_scale {
         # Formateo estricto a 2 decimales (.00)
         my $display_val = sprintf("%.2f", $val);
         
+        # Línea de cuadrícula horizontal sutil estilo TradingView
+        $canvas->createLine(
+            0, $y_pos,
+            $chart_end_x, $y_pos,
+            -fill => '#1e222d',
+            -dash => '.',
+            -tags => 'y_scale'
+        );
+
         $canvas->createLine(
             $chart_end_x, $y_pos, 
             $chart_end_x + 5, $y_pos,
